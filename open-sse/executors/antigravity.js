@@ -55,6 +55,18 @@ const stripBlacklisted = obj => {
   for (const key of ANTIGRAVITY_REQUEST_BLACKLIST) delete obj[key];
 };
 
+// Gemini 3.x thinking tiers travel in generationConfig.thinkingConfig like the
+// official client (wire ids no longer carry a synthetic "(tier)" suffix).
+// "agent"/pro ids are the High tier; MINIMAL is never emitted (it 400s on
+// gemini >= 3.7). (Parity: antigravity-opencode thinking.ts.)
+function resolveAntigravityThinkingLevel(model) {
+  const id = String(model || "");
+  if (!id.startsWith("gemini-") || id.includes("image")) return null;
+  if (/^gemini-(pro-agent|3-flash-agent)$/.test(id) || id.endsWith("-high")) return "HIGH";
+  if (id.endsWith("-extra-low") || id.endsWith("-low")) return "LOW";
+  if (id.endsWith("-medium")) return "MEDIUM";
+  return null;
+}
 // Image generation model name patterns
 const IMAGE_MODEL_PATTERNS = [
   /image/i,
@@ -276,6 +288,11 @@ export class AntigravityExecutor extends BaseExecutor {
     const generationConfig = { ...(requestWithoutTools.generationConfig || {}) };
     if (generationConfig.maxOutputTokens > MAX_ANTIGRAVITY_OUTPUT_TOKENS) {
       generationConfig.maxOutputTokens = MAX_ANTIGRAVITY_OUTPUT_TOKENS;
+    }
+
+    const thinkingLevel = resolveAntigravityThinkingLevel(body.model || model);
+    if (thinkingLevel) {
+      generationConfig.thinkingConfig = { includeThoughts: true, thinkingLevel };
     }
 
     const transformedRequest = {

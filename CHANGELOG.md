@@ -7,6 +7,7 @@
 - **Antigravity**: track the live IDE version from the official electron-builder update manifest (`ANTIGRAVITY_IDE_VERSION` env → manifest → pinned `2.11.0`) so the User-Agent never goes stale, and send the client parity headers `x-request-source: local` + `Client-Metadata` on every request
 - **Antigravity**: obfuscate server-flagged phrases in `systemInstruction` with a zero-width space (default `RFC 2119`; override via `ANTIGRAVITY_SENSITIVE_WORDS`, empty disables) and strip `google-antigravity/` branding — the upstream matcher answers these with a bare `429 RESOURCE_EXHAUSTED` indistinguishable from real quota
 - **Antigravity**: dereference internal JSON Schema `$ref`/`$defs`/`definitions` in tool parameters before cleaning (sibling keys win, cycle-safe) — previously a `$ref` node was stripped empty, losing the tool's real parameter shape; IDE version discovery is now lazy (first request) instead of firing a network fetch at module import
+- **Antigravity**: chat endpoint fallback chain `daily → daily-sandbox → production cloudcode-pa.googleapis.com`, failing over on `403`/`404` (in addition to 429/5xx) — accounts licensed only on PROD were dead-ending on the daily hosts' 404 "Requested entity was not found" / 403 "no valid license"
 
 # v0.5.75 (2026-09-10)
 

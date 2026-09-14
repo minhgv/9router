@@ -84,6 +84,13 @@ export const ANTHROPIC_COMPAT_BASE = "https://api.anthropic.com/v1";
 export const ANTIGRAVITY_IDE_VERSION = "2.11.0";
 export const ANTIGRAVITY_IDE_BASE_URL = "https://daily-cloudcode-pa.googleapis.com";
 export const ANTIGRAVITY_IDE_USER_AGENT = `antigravity/ide/${ANTIGRAVITY_IDE_VERSION} darwin/arm64`;
+// Sandbox mirror of the daily host — failover target on 429/5xx (mirrors the
+// official client's endpoint fallback ordering: daily first, sandbox second).
+export const ANTIGRAVITY_SANDBOX_BASE_URL = "https://daily-cloudcode-pa.sandbox.googleapis.com";
+// Production host — last-resort failover. loadCodeAssist/onboardUser always run
+// here, and some accounts (e.g. paid-tier) are only licensed on PROD: the daily
+// hosts 404 "Requested entity was not found" for their cloudaicompanionProject.
+export const ANTIGRAVITY_PROD_BASE_URL = "https://cloudcode-pa.googleapis.com";
 
 // Antigravity OAuth client credentials (public CLI client — duplicated in usage.js + src/lib/oauth)
 export const ANTIGRAVITY_OAUTH_CLIENT = {

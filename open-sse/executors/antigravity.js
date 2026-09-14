@@ -503,6 +503,21 @@ export class AntigravityExecutor extends BaseExecutor {
     return ANTIGRAVITY_TRANSIENT_ERROR_PATTERNS.some(pattern => pattern.test(message || ""));
   }
 
+  /**
+   * Fail over to the next base URL on rate-limit and transient upstream
+   * statuses (502/503/504), not only 429. 403/404 also fail over: the daily
+   * hosts reject PROD-only-licensed accounts ("no valid license" /
+   * "Requested entity was not found" for their cloudaicompanionProject), so
+   * the chain must reach the production host before giving up.
+   */
+  shouldRetry(status, urlIndex) {
+    const failover = status === HTTP_STATUS.RATE_LIMITED ||
+      ANTIGRAVITY_TRANSIENT_STATUSES.has(status) ||
+      status === HTTP_STATUS.FORBIDDEN ||
+      status === HTTP_STATUS.NOT_FOUND;
+    return failover && urlIndex + 1 < this.getFallbackCount();
+  }
+
   // Hook called by BaseExecutor.tryRetry: derive delay from Retry-After (header → body),
   // cap at MAX_RETRY_AFTER_MS, else retry transient Antigravity failures with backoff.
   // Return false to veto (fallback URL / final error).

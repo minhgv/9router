@@ -100,6 +100,28 @@ function buildAntigravityLabels(model, requestId) {
   }
   return labels;
 }
+
+// Zero-width obfuscation: a server-side matcher over systemInstruction flags
+// certain phrases and answers a bare 429 RESOURCE_EXHAUSTED (indistinguishable
+// from real quota). Insert U+200B after the FIRST character of each
+// case-sensitive literal match; phrases <2 chars are skipped. Override the list
+// with ANTIGRAVITY_SENSITIVE_WORDS (comma-separated); set it empty to disable.
+// (Parity: antigravity-opencode sensitive-words.ts.)
+const DEFAULT_ANTIGRAVITY_SENSITIVE_WORDS = ["RFC 2119"];
+
+function getAntigravitySensitiveWords() {
+  if (process.env.ANTIGRAVITY_SENSITIVE_WORDS === undefined) return DEFAULT_ANTIGRAVITY_SENSITIVE_WORDS;
+  return process.env.ANTIGRAVITY_SENSITIVE_WORDS.split(",").map(w => w.trim()).filter(w => w.length >= 2);
+}
+
+function obfuscateSensitiveWords(text) {
+  let out = text;
+  for (const word of getAntigravitySensitiveWords()) {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp(escaped, "g"), m => m[0] + "\u200B" + m.slice(1));
+  }
+  return out;
+}
 // Image generation model name patterns
 const IMAGE_MODEL_PATTERNS = [
   /image/i,
@@ -313,7 +335,7 @@ export class AntigravityExecutor extends BaseExecutor {
     // Strip tools/toolConfig (handled separately) and blacklisted fields that Google rejects
     const { tools: _originalTools, toolConfig: _originalToolConfig, ...requestWithoutTools } = body.request || {};
     stripBlacklisted(requestWithoutTools);
-    
+
     // Rewrite competing-client branding in system prompts (e.g. Zed's Claude prompt,
     // OpenCode naming) so Antigravity doesn't flag the request with a 429 Quota Exhausted.
     if (requestWithoutTools.systemInstruction?.parts) {
@@ -322,6 +344,7 @@ export class AntigravityExecutor extends BaseExecutor {
         for (const { from, to } of ANTIGRAVITY_PROMPT_REWRITES) {
           part.text = part.text.replaceAll(from, to);
         }
+        part.text = obfuscateSensitiveWords(part.text);
       }
     }
 

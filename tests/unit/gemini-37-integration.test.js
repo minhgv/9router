@@ -41,10 +41,10 @@ describe("Gemini 3.7 Antigravity tiers", () => {
         { projectId: "project", connectionId: "connection" }
       );
 
-      expect(upstreamModel).toBe(`gemini-3.7-flash-tiered(${tier})`);
-      expect(finalBody.model).toBe("gemini-3.7-flash-tiered");
+      expect(upstreamModel).toBe(`gemini-3.7-flash-${tier}`);
+      expect(finalBody.model).toBe(`gemini-3.7-flash-${tier}`);
       expect(finalBody.request.generationConfig.thinkingConfig).toEqual({
-        thinkingLevel: tier,
+        thinkingLevel: tier.toUpperCase(),
         includeThoughts: true,
       });
     }

@@ -180,10 +180,10 @@ function buildIdeRequestId({ body, request, credentials, model, requestType }) {
 export class AntigravityExecutor extends BaseExecutor {
   constructor() {
     super("antigravity", PROVIDERS.antigravity);
-    // Track the live IDE version from the official update manifest so the
-    // User-Agent never goes stale (a stale version is itself a fingerprint).
-    // Fire-and-forget; silently falls back to the pinned version.
-    ensureAntigravityVersion();
+    // NOTE: version discovery is deliberately NOT kicked here. The executors
+    // module builds singletons at import time, and a constructor-time fetch
+    // pollutes every test that stubs global fetch (and fires a network call on
+    // bare imports). Discovery runs lazily on the first real request instead.
   }
 
   buildUrl(model, stream, urlIndex = 0) {
@@ -198,6 +198,11 @@ export class AntigravityExecutor extends BaseExecutor {
   // sessionId comes from transformRequest output; base.execute runs transformRequest before
   // buildHeaders, so we read it from instance state cached there (fallback: explicit arg).
   buildHeaders(credentials, stream = true, sessionId = null) {
+    // Track the live IDE version from the official update manifest so the
+    // User-Agent never goes stale (a stale version is itself a fingerprint).
+    // Fire-and-forget; the first request uses the pinned fallback, later ones
+    // the discovered version.
+    ensureAntigravityVersion();
     return {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${credentials.accessToken}`,

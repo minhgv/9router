@@ -43,12 +43,26 @@ describe("Antigravity executor header parity", () => {
     expect(headers["Authorization"]).toBe("Bearer synthetic-token");
   });
 
-  it("constructor kicks off manifest discovery once, fire-and-forget", async () => {
-    vi.resetModules(); // fresh module state — the shared instance may already have a fetch in flight
-    const mod = await import("../../open-sse/utils/antigravityVersion.js");
-    const fetcher = vi.fn(async () => new Response("version: 2.13.0\n"));
-    await mod.ensureAntigravityVersion(fetcher);
-    await mod.ensureAntigravityVersion(fetcher);
-    expect(fetcher).toHaveBeenCalledTimes(1);
+  it("manifest discovery is lazy: buildHeaders kicks it, importing does not", async () => {
+    delete process.env.ANTIGRAVITY_IDE_VERSION;
+    const fetched = [];
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      fetched.push("manifest");
+      return new Response("version: 2.13.0\n");
+    }));
+    try {
+      vi.resetModules(); // fresh module state, no discovery in flight
+      const versionMod = await import("../../open-sse/utils/antigravityVersion.js");
+      const executorMod = await import("../../open-sse/executors/antigravity.js");
+      expect(fetched).toEqual([]); // import (and singleton construction) must not fetch
+
+      const executor = new executorMod.AntigravityExecutor();
+      executor.buildHeaders({ accessToken: "tok" }, true);
+      expect(fetched).toEqual(["manifest"]); // first real request kicks discovery
+      await new Promise(r => setTimeout(r, 10));
+      expect(versionMod.getAntigravityVersion()).toBe("2.13.0");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

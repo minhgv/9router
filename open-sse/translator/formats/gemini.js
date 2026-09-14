@@ -340,13 +340,50 @@ function ensureArrayItems(obj) {
   }
   for (const v of Object.values(obj)) if (v && typeof v === "object") ensureArrayItems(v);
 }
-
-// Clean JSON Schema for Antigravity API compatibility - removes unsupported keywords recursively
-export function cleanJSONSchemaForAntigravity(schema) {
+// Phase 0 (ported from antigravity-opencode schema.ts): recursively resolve
+// internal $ref pointers (#/$defs/... and #/definitions/...) BEFORE anything
+// else runs. Without this, a $ref node is stripped to an empty object and the
+// tool loses its real parameter shape (upstream then 400s or misvalidates).
+// Sibling keys win over the resolved target; local $defs/definitions overlay
+// the root ones; a visited-Set guards $ref cycles.
+function dereferenceSchema(schema, rootDefs = {}, visited = new Set()) {
   if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map(item => dereferenceSchema(item, rootDefs, visited));
 
-  // Mutate directly (schema is only used once per request)
-  let cleaned = schema;
+  if (visited.has(schema)) return schema;
+  visited.add(schema);
+
+  const defs = { ...rootDefs };
+  if (schema.$defs && typeof schema.$defs === "object" && !Array.isArray(schema.$defs)) Object.assign(defs, schema.$defs);
+  if (schema.definitions && typeof schema.definitions === "object" && !Array.isArray(schema.definitions)) Object.assign(defs, schema.definitions);
+
+  if (typeof schema.$ref === "string") {
+    const match = schema.$ref.match(/^#\/(?:\$defs|definitions)\/(.+)$/);
+    if (match && match[1] && defs[match[1]] !== undefined) {
+      const resolved = dereferenceSchema(defs[match[1]], defs, visited);
+      if (resolved && typeof resolved === "object" && !Array.isArray(resolved)) {
+        const { $ref: _dropped, ...rest } = schema;
+        const restCleaned = dereferenceSchema(rest, defs, visited);
+        return { ...resolved, ...(restCleaned && typeof restCleaned === "object" ? restCleaned : {}) };
+      }
+      return resolved;
+    }
+  }
+
+  const out = {};
+  for (const [key, value] of Object.entries(schema)) {
+    out[key] = dereferenceSchema(value, defs, visited);
+  }
+  return out;
+}
+
+ // Clean JSON Schema for Antigravity API compatibility - removes unsupported keywords recursively
+ export function cleanJSONSchemaForAntigravity(schema) {
+   if (!schema || typeof schema !== "object") return schema;
+ 
+  // Dereference first (produces a fresh tree), then mutate directly
+  // (schema is only used once per request)
+  let cleaned = dereferenceSchema(schema);
 
   // Phase 1: Convert and prepare
   convertConstToEnum(cleaned);

@@ -6,6 +6,7 @@
 - **Antigravity**: send client-style `request.labels` (`trajectory_id`, `last_step_index`, `model_enum` for pinned agent ids, `used_claude`/`used_claude_conservative` for Claude) and cap `maxOutputTokens` per wire profile (65536/65535) instead of a flat 64000 — matching the official client's telemetry footprint
 - **Antigravity**: track the live IDE version from the official electron-builder update manifest (`ANTIGRAVITY_IDE_VERSION` env → manifest → pinned `2.11.0`) so the User-Agent never goes stale, and send the client parity headers `x-request-source: local` + `Client-Metadata` on every request
 - **Antigravity**: obfuscate server-flagged phrases in `systemInstruction` with a zero-width space (default `RFC 2119`; override via `ANTIGRAVITY_SENSITIVE_WORDS`, empty disables) and strip `google-antigravity/` branding — the upstream matcher answers these with a bare `429 RESOURCE_EXHAUSTED` indistinguishable from real quota
+- **Antigravity**: dereference internal JSON Schema `$ref`/`$defs`/`definitions` in tool parameters before cleaning (sibling keys win, cycle-safe) — previously a `$ref` node was stripped empty, losing the tool's real parameter shape; IDE version discovery is now lazy (first request) instead of firing a network fetch at module import
 
 # v0.5.75 (2026-09-10)
 

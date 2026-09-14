@@ -67,6 +67,38 @@ function resolveAntigravityThinkingLevel(model) {
   if (id.endsWith("-medium")) return "MEDIUM";
   return null;
 }
+
+// Per-wire-id profile constants captured from the real antigravity/hub client:
+// `labels.model_enum` telemetry tokens and the per-model maxOutputTokens
+// ceiling the backend enforces. Claude ids carry no enum. (Parity:
+// antigravity-opencode wire-profiles.ts.)
+const ANTIGRAVITY_WIRE_PROFILES = {
+  "gemini-3.5-flash-extra-low": { modelEnum: "MODEL_PLACEHOLDER_M187", maxOutputTokens: 65536 },
+  "gemini-3.5-flash-low": { modelEnum: "MODEL_PLACEHOLDER_M20", maxOutputTokens: 65536 },
+  "gemini-3-flash-agent": { modelEnum: "MODEL_PLACEHOLDER_M132", maxOutputTokens: 65536 },
+  "gemini-3.1-pro-low": { modelEnum: "MODEL_PLACEHOLDER_M36", maxOutputTokens: 65535 },
+  "gemini-pro-agent": { modelEnum: "MODEL_PLACEHOLDER_M16", maxOutputTokens: 65535 },
+};
+
+// Client-style request.labels: trajectory tracking + model telemetry. Must live
+// in request.labels — a root-level `labels` on the envelope 400s upstream.
+// (Parity: antigravity-opencode session.ts.)
+function buildAntigravityLabels(model, requestId) {
+  const id = String(model || "");
+  const pieces = String(requestId || "").split("/");
+  const labels = {};
+  if (pieces[0] === "agent" && pieces.length >= 5) {
+    labels.trajectory_id = pieces[3];
+    labels.last_step_index = String(Math.max(0, Number(pieces[4]) - 1));
+  }
+  const profile = ANTIGRAVITY_WIRE_PROFILES[id];
+  if (profile?.modelEnum) labels.model_enum = profile.modelEnum;
+  if (id.includes("claude")) {
+    labels.used_claude = "1";
+    labels.used_claude_conservative = "1";
+  }
+  return labels;
+}
 // Image generation model name patterns
 const IMAGE_MODEL_PATTERNS = [
   /image/i,
@@ -285,12 +317,16 @@ export class AntigravityExecutor extends BaseExecutor {
       }
     }
 
+    const wireId = body.model || model;
     const generationConfig = { ...(requestWithoutTools.generationConfig || {}) };
-    if (generationConfig.maxOutputTokens > MAX_ANTIGRAVITY_OUTPUT_TOKENS) {
-      generationConfig.maxOutputTokens = MAX_ANTIGRAVITY_OUTPUT_TOKENS;
+    // Per-model ceiling from the wire profile (65536/65535 for pinned agent
+    // ids); everything else stays under the universal Claude-safe 64000.
+    const outputCeiling = ANTIGRAVITY_WIRE_PROFILES[wireId]?.maxOutputTokens || MAX_ANTIGRAVITY_OUTPUT_TOKENS;
+    if (generationConfig.maxOutputTokens > outputCeiling) {
+      generationConfig.maxOutputTokens = outputCeiling;
     }
 
-    const thinkingLevel = resolveAntigravityThinkingLevel(body.model || model);
+    const thinkingLevel = resolveAntigravityThinkingLevel(wireId);
     if (thinkingLevel) {
       generationConfig.thinkingConfig = { includeThoughts: true, thinkingLevel };
     }
@@ -314,12 +350,15 @@ export class AntigravityExecutor extends BaseExecutor {
     // requests; the "agent" bucket is a rate-limited lane and trips bare 429s
     // (RESOURCE_EXHAUSTED without ErrorInfo). Keep the label internal for
     // trajectory seeding only. (Parity with antigravity-opencode envelope.ts.)
+    const requestId = buildIdeRequestId({ body, request: transformedRequest, credentials, model, requestType: "agent" });
+    transformedRequest.labels = buildAntigravityLabels(wireId, requestId);
+
     return {
       ...body,
       project: projectId,
-      model: body.model || model,
+      model: wireId,
       userAgent: "antigravity",
-      requestId: buildIdeRequestId({ body, request: transformedRequest, credentials, model, requestType: "agent" }),
+      requestId,
       request: transformedRequest
     };
   }

@@ -73,14 +73,20 @@ describe("antigravity computeRetryDelay hook (D3)", () => {
   });
 
   it("buildHeaders matches official IDE stream headers", () => {
-    ag._lastSessionId = "sess-123";
-    const h = ag.buildHeaders({ accessToken: "tok" }, true);
-    expect(h["User-Agent"]).toBe("antigravity/ide/2.11.0 darwin/arm64");
-    expect(h["Content-Type"]).toBe("application/json");
-    expect(h["Authorization"]).toBe("Bearer tok");
-    expect(h).not.toHaveProperty("X-Machine-Session-Id");
-    expect(h).not.toHaveProperty("x-request-source");
-    expect(h).not.toHaveProperty("Accept");
+    process.env.ANTIGRAVITY_IDE_VERSION = "2.11.0"; // pin so version discovery can't race this test
+    try {
+      ag._lastSessionId = "sess-123";
+      const h = ag.buildHeaders({ accessToken: "tok" }, true);
+      expect(h["User-Agent"]).toBe("antigravity/ide/2.11.0 darwin/arm64");
+      expect(h["Content-Type"]).toBe("application/json");
+      expect(h["Authorization"]).toBe("Bearer tok");
+      expect(h["x-request-source"]).toBe("local");
+      expect(h["Client-Metadata"]).toBe("ideType=ANTIGRAVITY,platform=MACOS,pluginType=GEMINI");
+      expect(h).not.toHaveProperty("X-Machine-Session-Id");
+      expect(h).not.toHaveProperty("Accept");
+    } finally {
+      delete process.env.ANTIGRAVITY_IDE_VERSION;
+    }
   });
 
   it("transforms chat requests with official IDE requestId shape and 64000 token cap", () => {

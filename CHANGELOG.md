@@ -4,6 +4,7 @@
 - **Antigravity**: stop sending `requestType: "agent"` in the request envelope — the official consumer Cloud Code client does not send it and the "agent" lane is a rate-limited bucket that trips bare `429 RESOURCE_EXHAUSTED` responses without quota details (parity with the antigravity-opencode client; image/search lanes unchanged)
 - **Antigravity**: send clean wire model ids (no synthetic `(tier)` suffix, which upstream rejects as 404 on some lanes), map `gemini-3.5-flash-high`/`gemini-3.1-pro` to the real agent ids, and carry the thinking tier in `generationConfig.thinkingConfig.thinkingLevel` (`HIGH`/`MEDIUM`/`LOW` + `includeThoughts`) exactly like the official client
 - **Antigravity**: send client-style `request.labels` (`trajectory_id`, `last_step_index`, `model_enum` for pinned agent ids, `used_claude`/`used_claude_conservative` for Claude) and cap `maxOutputTokens` per wire profile (65536/65535) instead of a flat 64000 — matching the official client's telemetry footprint
+- **Antigravity**: track the live IDE version from the official electron-builder update manifest (`ANTIGRAVITY_IDE_VERSION` env → manifest → pinned `2.11.0`) so the User-Agent never goes stale, and send the client parity headers `x-request-source: local` + `Client-Metadata` on every request
 
 # v0.5.75 (2026-09-10)
 

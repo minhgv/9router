@@ -8,6 +8,7 @@ import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { cleanJSONSchemaForAntigravity, normalizeGeminiContents } from "../translator/formats/gemini.js";
 import { DEFAULT_THINKING_AG_SIGNATURE } from "../config/defaultThinkingSignature.js";
 import { getGeminiThoughtSignatureSync } from "../services/thoughtSignatureStore.js";
+import { ensureAntigravityVersion, getAntigravityIdeUserAgent } from "../utils/antigravityVersion.js";
 
 // Sanitize function name: Gemini requires [a-zA-Z_][a-zA-Z0-9_.:\-]{0,63}
 function sanitizeFunctionName(name) {
@@ -157,6 +158,10 @@ function buildIdeRequestId({ body, request, credentials, model, requestType }) {
 export class AntigravityExecutor extends BaseExecutor {
   constructor() {
     super("antigravity", PROVIDERS.antigravity);
+    // Track the live IDE version from the official update manifest so the
+    // User-Agent never goes stale (a stale version is itself a fingerprint).
+    // Fire-and-forget; silently falls back to the pinned version.
+    ensureAntigravityVersion();
   }
 
   buildUrl(model, stream, urlIndex = 0) {
@@ -174,7 +179,10 @@ export class AntigravityExecutor extends BaseExecutor {
     return {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${credentials.accessToken}`,
-      "User-Agent": this.config.headers?.["User-Agent"] || ANTIGRAVITY_HEADERS["User-Agent"],
+      "User-Agent": getAntigravityIdeUserAgent() || this.config.headers?.["User-Agent"] || ANTIGRAVITY_HEADERS["User-Agent"],
+      // Client parity headers (antigravity-opencode envelope.ts) — static fingerprint metadata.
+      "x-request-source": "local",
+      "Client-Metadata": "ideType=ANTIGRAVITY,platform=MACOS,pluginType=GEMINI",
     };
   }
 

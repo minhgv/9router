@@ -1,3 +1,8 @@
+# Unreleased
+
+## Fixes
+- **Antigravity**: stop sending `requestType: "agent"` in the request envelope — the official consumer Cloud Code client does not send it and the "agent" lane is a rate-limited bucket that trips bare `429 RESOURCE_EXHAUSTED` responses without quota details (parity with the antigravity-opencode client; image/search lanes unchanged)
+
 # v0.5.75 (2026-09-10)
 
 ## Features

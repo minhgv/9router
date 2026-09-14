@@ -293,12 +293,15 @@ export class AntigravityExecutor extends BaseExecutor {
 
     this._lastSessionId = transformedRequest.sessionId; // cached for buildHeaders (base.execute order)
 
+    // The official consumer Cloud Code client does not send `requestType` on text
+    // requests; the "agent" bucket is a rate-limited lane and trips bare 429s
+    // (RESOURCE_EXHAUSTED without ErrorInfo). Keep the label internal for
+    // trajectory seeding only. (Parity with antigravity-opencode envelope.ts.)
     return {
       ...body,
       project: projectId,
       model: body.model || model,
       userAgent: "antigravity",
-      requestType: "agent",
       requestId: buildIdeRequestId({ body, request: transformedRequest, credentials, model, requestType: "agent" }),
       request: transformedRequest
     };

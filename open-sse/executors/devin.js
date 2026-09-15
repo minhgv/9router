@@ -132,21 +132,7 @@ export class DevinExecutor extends BaseExecutor {
               proxyOptions,
             })
           : null;
-        // Step 3: Build GetChatMessageRequest
-        const requestPayload = this.buildChatPayload({
-          body,
-          model: wireModel,
-          modelMeta,
-          assignment,
-          sessionToken,
-          userJwt,
-          cascadeId,
-          log,
-        });
-
-        const protoBinary = toBinary(GetChatMessageRequestSchema, requestPayload);
-        const framedBody = buildConnectFrame(protoBinary, true);
-
+        // Step 3: Build chat URL + headers (shared between hedged and non-hedged paths)
         const chatUrl = `${chatBaseUrl}${DEVIN_CHAT_PATH}`;
         const chatHeaders = {
           "content-type": "application/connect+proto",
@@ -157,47 +143,120 @@ export class DevinExecutor extends BaseExecutor {
           "user-agent": "connect-go/1.18.1 (go1.26.3)",
         };
 
-        log?.debug?.(
-          "DEVIN",
-          `Devin -> ${chatUrl} (model=${assignment?.modelUid ?? wireModel}${isRouterModel ? `, router=${wireModel}` : ""}, cascadeId=${cascadeId})`
-        );
+        const hedge = this.hedgeCount(assignment?.modelUid ?? wireModel);
 
-        const upstream = await proxyAwareFetch(
-          chatUrl,
-          {
-            method: "POST",
-            headers: chatHeaders,
-            body: framedBody,
-            signal,
-          },
-          proxyOptions
-        );
+        if (hedge <= 1) {
+          // Single request — no hedging
+          const requestPayload = this.buildChatPayload({
+            body, model: wireModel, modelMeta, assignment, sessionToken, userJwt, cascadeId, log,
+          });
+          const protoBinary = toBinary(GetChatMessageRequestSchema, requestPayload);
+          const framedBody = buildConnectFrame(protoBinary, true);
 
-        if (!upstream.ok) {
-          if (this.shouldRetry(upstream.status) && attempt < maxRetries) {
-            const delay = this.computeRetryDelay(upstream, attempt);
-            log?.warn?.("DEVIN", `Devin upstream HTTP ${upstream.status}, retrying after ${delay}ms...`);
-            await new Promise((r) => setTimeout(r, delay));
-            continue;
+          log?.debug?.(
+            "DEVIN",
+            `Devin -> ${chatUrl} (model=${assignment?.modelUid ?? wireModel}${isRouterModel ? `, router=${wireModel}` : ""}, cascadeId=${cascadeId})`
+          );
+
+          const upstream = await proxyAwareFetch(
+            chatUrl,
+            { method: "POST", headers: chatHeaders, body: framedBody, signal },
+            proxyOptions
+          );
+
+          if (!upstream.ok) {
+            if (this.shouldRetry(upstream.status) && attempt < maxRetries) {
+              const delay = this.computeRetryDelay(upstream, attempt);
+              log?.warn?.("DEVIN", `Devin upstream HTTP ${upstream.status}, retrying after ${delay}ms...`);
+              await new Promise((r) => setTimeout(r, delay));
+              continue;
+            }
+            const errorText = await upstream.text().catch(() => "");
+            throw new Error(`Devin upstream HTTP ${upstream.status}: ${errorText || upstream.statusText}`);
           }
-          const errorText = await upstream.text().catch(() => "");
-          throw new Error(`Devin upstream HTTP ${upstream.status}: ${errorText || upstream.statusText}`);
+
+          const sseResponse = this.createSseStream({
+            upstream, model: assignment?.modelUid ?? wireModel,
+            protoBinaryLength: protoBinary.length, signal, log,
+          });
+          return { response: sseResponse, url: chatUrl, headers: chatHeaders };
         }
 
-        // Stream response: once reading begins, NO replay / NO retry after first client byte
-        const sseResponse = this.createSseStream({
-          upstream,
-          model: assignment?.modelUid ?? wireModel,
-          protoBinaryLength: protoBinary.length,
-          signal,
-          log,
-        });
+        // Hedged: fire N identical GetChatMessage requests with independent
+        // cascadeIds, race to first data frame, abort the rest. SWE models
+        // bill $0 so duplicates are free; measured 3-4x TTFT improvement
+        // under load (10-15s → 3-4s). DEVIN_HEDGE=1..5 overrides; 1 disables.
+        const controllers = Array.from({ length: hedge }, () => new AbortController());
+        const parentAbortHandler = () => controllers.forEach(c => { try { c.abort(); } catch {} });
+        if (signal?.aborted) { parentAbortHandler(); throw signal.reason || new Error("Request aborted"); }
+        signal?.addEventListener("abort", parentAbortHandler, { once: true });
 
-        return {
-          response: sseResponse,
-          url: chatUrl,
-          headers: chatHeaders,
-        };
+        try {
+          const hedgePayloads = Array.from({ length: hedge }, () => {
+            const hedgeCascadeId = crypto.randomUUID();
+            const payload = this.buildChatPayload({
+              body, model: wireModel, modelMeta, assignment, sessionToken, userJwt,
+              cascadeId: hedgeCascadeId, log,
+            });
+            const binary = toBinary(GetChatMessageRequestSchema, payload);
+            return { cascadeId: hedgeCascadeId, binary, frame: buildConnectFrame(binary, true) };
+          });
+
+          log?.debug?.(
+            "DEVIN",
+            `Devin -> ${chatUrl} (model=${assignment?.modelUid ?? wireModel}, hedging ${hedge} requests)`
+          );
+
+          const responses = await Promise.all(
+            controllers.map((controller, i) =>
+              proxyAwareFetch(chatUrl, {
+                method: "POST", headers: chatHeaders, body: hedgePayloads[i].frame,
+                signal: controller.signal,
+              }, proxyOptions).catch(() => null)
+            )
+          );
+
+          const okIndices = responses
+            .map((r, i) => (r && r.ok) ? i : -1)
+            .filter(i => i >= 0);
+
+          if (okIndices.length === 0) {
+            const firstErr = responses.find(r => r);
+            if (firstErr && this.shouldRetry(firstErr.status) && attempt < maxRetries) {
+              const delay = this.computeRetryDelay(firstErr, attempt);
+              log?.warn?.("DEVIN", `Devin all ${hedge} hedged requests failed (HTTP ${firstErr.status}), retrying after ${delay}ms...`);
+              await new Promise((r) => setTimeout(r, delay));
+              continue;
+            }
+            const errorText = firstErr ? await firstErr.text().catch(() => "") : "";
+            throw new Error(`Devin upstream HTTP ${firstErr?.status || "unknown"}: ${errorText || firstErr?.statusText || "all hedged requests failed"}`);
+          }
+
+          if (okIndices.length === 1) {
+            const idx = okIndices[0];
+            const sseResponse = this.createSseStream({
+              upstream: responses[idx], model: assignment?.modelUid ?? wireModel,
+              protoBinaryLength: hedgePayloads[idx].binary.length, signal, log,
+            });
+            return { response: sseResponse, url: chatUrl, headers: chatHeaders };
+          }
+
+          // Multiple OK — race to first data frame
+          const okResponses = okIndices.map(i => responses[i]);
+          const okControllers = okIndices.map(i => controllers[i]);
+
+          log?.debug?.("DEVIN", `Hedge race: ${okIndices.length} requests connected, racing to first data frame`);
+
+          const racedResponse = raceHedgedStreams(okResponses, okControllers, { signal, log });
+
+          const sseResponse = this.createSseStream({
+            upstream: racedResponse, model: assignment?.modelUid ?? wireModel,
+            protoBinaryLength: hedgePayloads[0].binary.length, signal, log,
+          });
+          return { response: sseResponse, url: chatUrl, headers: chatHeaders };
+        } finally {
+          signal?.removeEventListener("abort", parentAbortHandler);
+        }
       } catch (err) {
         lastError = err;
         if (signal?.aborted || err.name === "AbortError") {
@@ -350,6 +409,22 @@ export class DevinExecutor extends BaseExecutor {
   }
 
   /**
+   * Determine how many identical GetChatMessage requests to fire in
+   * parallel (hedging). The first to emit a data frame wins; the rest
+   * are aborted. SWE models bill $0 so duplicates are free, and this
+   * cuts TTFT 3-4x under load. DEVIN_HEDGE=1..5 overrides for all
+   * models; 1 disables hedging entirely.
+   */
+  hedgeCount(modelUid) {
+    const raw = process.env.DEVIN_HEDGE;
+    if (raw !== undefined) {
+      const n = Math.floor(Number(raw));
+      return Number.isFinite(n) && n >= 1 && n <= 5 ? n : 1;
+    }
+    return modelUid?.startsWith("swe") ? 3 : 1;
+  }
+
+  /**
    * Resolve a server-side router (e.g. adaptive) into a concrete model uid via
    * AssignModel. The router uid is never a legal chatModelUid, so any failure —
    * HTTP error, undecodable body, missing/blank assignment fields, or the
@@ -462,12 +537,26 @@ export class DevinExecutor extends BaseExecutor {
             }))
           : [];
 
+        // Replay thinking + signature so the model keeps its own reasoning
+        // trace across tool-call turns (mirrors the Devin CLI). The server
+        // verifies the signature chain; dropping it (the old behavior) loses
+        // the model's reasoning context. Fields arrive via custom SSE delta
+        // fields (reasoning_signature / reasoning_signature_type /
+        // reasoning_redacted) that the client echoes back on the assistant
+        // message. Graceful degradation: absent fields → empty (old behavior).
+        const thinking = typeof msg.reasoning_content === "string" ? msg.reasoning_content : "";
+        const signature = typeof msg.reasoning_signature === "string" ? msg.reasoning_signature : "";
+        const signatureType = typeof msg.reasoning_signature_type === "string" ? msg.reasoning_signature_type : "";
+        const thinkingRedacted = Boolean(msg.reasoning_redacted);
+
         return {
           messageId,
           source: ChatMessageSource.SYSTEM,
           prompt: text,
-          thinking: "", // NEVER replay thinking
-          signature: "", // NEVER replay signature
+          thinking,
+          signature,
+          ...(thinkingRedacted ? { thinkingRedacted } : {}),
+          ...(signatureType ? { signatureType } : {}),
           toolCalls,
         };
       }
@@ -619,6 +708,41 @@ export class DevinExecutor extends BaseExecutor {
                     created,
                     model: responseModel,
                     delta: { reasoning_content: msg.deltaThinking },
+                  })
+                );
+              }
+
+              // Thinking signature (replay chain). Emitted as custom delta
+              // fields so the client can echo them back on the next assistant
+              // turn, letting the server verify the reasoning trace across
+              // tool-call boundaries. Mirrors Devin CLI fields 12/18/13.
+              if (msg.deltaSignature) {
+                emit(
+                  chatChunkSse({
+                    id: responseId || `chatcmpl-${created}`,
+                    created,
+                    model: responseModel,
+                    delta: { reasoning_signature: msg.deltaSignature },
+                  })
+                );
+              }
+              if (msg.deltaSignatureType) {
+                emit(
+                  chatChunkSse({
+                    id: responseId || `chatcmpl-${created}`,
+                    created,
+                    model: responseModel,
+                    delta: { reasoning_signature_type: msg.deltaSignatureType },
+                  })
+                );
+              }
+              if (msg.thinkingRedacted) {
+                emit(
+                  chatChunkSse({
+                    id: responseId || `chatcmpl-${created}`,
+                    created,
+                    model: responseModel,
+                    delta: { reasoning_redacted: true },
                   })
                 );
               }
@@ -901,4 +1025,110 @@ function parseConnectTrailerError(payload) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Race N hedged upstream Responses to the first Connect data frame.
+ * The winner's body is forwarded as a new Response; all losers are
+ * aborted via their AbortControllers. Raw bytes are forwarded (not
+ * re-serialized) so createSseStream can parse them normally.
+ *
+ * @param {Response[]} responses  — OK upstream responses to race
+ * @param {AbortController[]} controllers — one per response, for aborting losers
+ * @param {{ signal?: AbortSignal, log?: object }} opts
+ * @returns {Response} — synthetic Response wrapping the winning stream
+ */
+function raceHedgedStreams(responses, controllers, { signal, log }) {
+  const readers = responses.map(r => r.body.getReader());
+  // Prevent unhandled rejections when loser sockets die after abort.
+  readers.forEach(r => { void r.closed.catch(() => {}); });
+
+  let winner = -1;
+  const buffers = readers.map(() => Buffer.alloc(0));
+  let winnerReader = null;
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const enqueue = (chunk) => controller.enqueue(chunk);
+
+      async function runReader(i) {
+        const reader = readers[i];
+        try {
+          // Phase 1: race to first data frame
+          while (winner === -1) {
+            if (signal?.aborted) throw signal.reason || new Error("Stream aborted");
+            const { value, done } = await reader.read();
+            if (done) return; // ended without winning
+
+            buffers[i] = Buffer.concat([buffers[i], Buffer.from(value)]);
+
+            // Check for a data frame (parse a copy — don't consume the buffer)
+            let foundData = false;
+            try {
+              const { frames } = parseConnectFrames(Buffer.from(buffers[i]), { isStreamEnd: false });
+              foundData = frames.some(f => !f.isEndStream);
+            } catch {
+              // partial frame — wait for more data
+            }
+
+            if (foundData) {
+              winner = i;
+              winnerReader = reader;
+              // Abort all losers
+              for (let j = 0; j < controllers.length; j++) {
+                if (j !== i) { try { controllers[j].abort(); } catch {} }
+              }
+              // Forward all buffered raw bytes (re-parsed by createSseStream)
+              enqueue(buffers[i]);
+              buffers[i] = Buffer.alloc(0);
+              log?.debug?.("DEVIN", `Hedge race: request #${i} won`);
+              break;
+            }
+          }
+
+          // Phase 2: if we're the winner, forward remaining data
+          if (winner === i && winnerReader) {
+            while (true) {
+              if (signal?.aborted) throw signal.reason || new Error("Stream aborted");
+              const { value, done } = await winnerReader.read();
+              if (done) break;
+              if (value) enqueue(Buffer.from(value));
+            }
+          }
+        } catch (err) {
+          if (winner === i) throw err; // winner error propagates
+          // loser error (abort) — expected, swallow
+        }
+      }
+
+      try {
+        const results = await Promise.allSettled(readers.map((_, i) => runReader(i)));
+
+        if (winner === -1) {
+          controller.error(new Error("All hedged streams ended without producing a data frame"));
+          return;
+        }
+
+        const winnerResult = results[winner];
+        if (winnerResult?.status === "rejected") {
+          controller.error(winnerResult.reason);
+          return;
+        }
+
+        controller.close();
+      } catch (err) {
+        try { controller.error(err); } catch {}
+      } finally {
+        // Release all non-winner readers
+        for (let i = 0; i < readers.length; i++) {
+          if (i !== winner) {
+            try { readers[i].releaseLock(); } catch {}
+            try { responses[i].body?.cancel().catch(() => {}); } catch {}
+          }
+        }
+      }
+    },
+  });
+
+  return new Response(stream, { headers: responses[0].headers });
 }

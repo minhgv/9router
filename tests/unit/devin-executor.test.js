@@ -302,14 +302,22 @@ describe("DevinExecutor Registration & Provider Config", () => {
 describe("DevinExecutor Execution & Wire Protocol", () => {
   let executor;
   let proxyFetchSpy;
+  let savedHedge;
 
   beforeEach(() => {
+    // Disable hedging for unit tests — existing tests mock single-request
+    // flows and expect exactly one GetChatMessage call. Hedging behavior
+    // is verified separately.
+    savedHedge = process.env.DEVIN_HEDGE;
+    process.env.DEVIN_HEDGE = "1";
     executor = new DevinExecutor();
     proxyFetchSpy = mocks.proxyAwareFetch;
     proxyFetchSpy.mockReset();
   });
 
   afterEach(() => {
+    if (savedHedge === undefined) delete process.env.DEVIN_HEDGE;
+    else process.env.DEVIN_HEDGE = savedHedge;
     vi.restoreAllMocks();
   });
 
@@ -1287,6 +1295,214 @@ describe("DevinExecutor Execution & Wire Protocol", () => {
     // Verify proxyFetchSpy was only called twice (GetUserJwt and GetChatMessage), no retries
     expect(proxyFetchSpy).toHaveBeenCalledTimes(2);
     expect(cancelCalled).toBe(true);
+  });
+
+  it("replays reasoning_content and reasoning_signature from assistant history (thinking round-trip)", async () => {
+    let capturedChatBody = null;
+
+    proxyFetchSpy.mockImplementation(async (url, options) => {
+      if (url.includes(DEVIN_AUTH_PATH)) {
+        return new Response(
+          toBinary(GetUserJwtResponseSchema, { userJwt: "jwt_rt" }),
+          { status: 200 }
+        );
+      }
+      if (url.includes(DEVIN_CHAT_PATH)) {
+        capturedChatBody = options.body;
+        const f1 = buildConnectFrame(
+          toBinary(GetChatMessageResponseSchema, {
+            deltaText: "OK",
+            stopReason: StopReason.STOP_PATTERN,
+          }),
+          true
+        );
+        return new Response(createMockStream([f1]), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const messages = [
+      { role: "user", content: "Think step by step" },
+      {
+        role: "assistant",
+        content: "Here is the answer",
+        reasoning_content: "I considered all options carefully",
+        reasoning_signature: "sig_abc123",
+        reasoning_signature_type: "openai",
+        tool_calls: [],
+      },
+      { role: "user", content: "Continue" },
+    ];
+
+    const result = await executor.execute({
+      model: "devin/swe-1-6",
+      body: { messages },
+      credentials: { apiKey: "tok" },
+    });
+
+    await readSseResponse(result.response);
+
+    expect(capturedChatBody).toBeDefined();
+    const flag = capturedChatBody[0];
+    expect(flag).toBe(0x01);
+    const payloadLen = new DataView(capturedChatBody.buffer, capturedChatBody.byteOffset).getUint32(1, false);
+    const decompressed = zlib.gunzipSync(capturedChatBody.subarray(5, 5 + payloadLen));
+    const req = fromBinary(GetChatMessageRequestSchema, decompressed);
+
+    // Assistant turn: thinking + signature replayed from reasoning_content / reasoning_signature
+    const assistantTurn = req.chatMessagePrompts[1];
+    expect(assistantTurn.source).toBe(ChatMessageSource.SYSTEM);
+    expect(assistantTurn.thinking).toBe("I considered all options carefully");
+    expect(assistantTurn.signature).toBe("sig_abc123");
+    expect(assistantTurn.signatureType).toBe("openai");
+  });
+
+  it("emits reasoning_signature, reasoning_signature_type, and reasoning_redacted as SSE delta fields", async () => {
+    proxyFetchSpy.mockImplementation(async (url) => {
+      if (url.includes(DEVIN_AUTH_PATH)) {
+        return new Response(
+          toBinary(GetUserJwtResponseSchema, { userJwt: "jwt_sig" }),
+          { status: 200 }
+        );
+      }
+      if (url.includes(DEVIN_CHAT_PATH)) {
+        const f1 = buildConnectFrame(
+          toBinary(GetChatMessageResponseSchema, {
+            deltaThinking: "Reasoning here",
+            deltaSignature: "sig_xyz",
+            deltaSignatureType: "openai",
+            thinkingRedacted: true,
+          }),
+          true
+        );
+        const f2 = buildConnectFrame(
+          toBinary(GetChatMessageResponseSchema, {
+            deltaText: "Answer",
+            stopReason: StopReason.STOP_PATTERN,
+          }),
+          true
+        );
+        return new Response(createMockStream([f1, f2]), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const result = await executor.execute({
+      model: "devin/swe-1-6",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      credentials: { apiKey: "tok" },
+    });
+
+    const events = await readSseResponse(result.response);
+    const parsedChunks = events.slice(0, -1).map((e) => JSON.parse(e));
+
+    // Signature emitted as custom delta field
+    const sigChunk = parsedChunks.find(c => c.choices[0].delta.reasoning_signature);
+    expect(sigChunk).toBeDefined();
+    expect(sigChunk.choices[0].delta.reasoning_signature).toBe("sig_xyz");
+
+    // Signature type emitted
+    const sigTypeChunk = parsedChunks.find(c => c.choices[0].delta.reasoning_signature_type);
+    expect(sigTypeChunk).toBeDefined();
+    expect(sigTypeChunk.choices[0].delta.reasoning_signature_type).toBe("openai");
+
+    // Thinking redacted flag emitted
+    const redactedChunk = parsedChunks.find(c => c.choices[0].delta.reasoning_redacted);
+    expect(redactedChunk).toBeDefined();
+    expect(redactedChunk.choices[0].delta.reasoning_redacted).toBe(true);
+  });
+
+  it("hedges SWE models: fires N requests, first data frame wins", async () => {
+    // Enable hedging for this test
+    process.env.DEVIN_HEDGE = "3";
+
+    let chatCallCount = 0;
+
+    proxyFetchSpy.mockImplementation(async (url) => {
+      if (url.includes(DEVIN_AUTH_PATH)) {
+        return new Response(
+          toBinary(GetUserJwtResponseSchema, { userJwt: "jwt_hedge" }),
+          { status: 200 }
+        );
+      }
+      if (url.includes(DEVIN_CHAT_PATH)) {
+        chatCallCount++;
+
+        // Requests 1 and 2: slow (delayed stream)
+        if (chatCallCount <= 2) {
+          const slowStream = new ReadableStream({
+            start(controller) {
+              setTimeout(() => {
+                const f = buildConnectFrame(
+                  toBinary(GetChatMessageResponseSchema, {
+                    deltaText: `slow_${chatCallCount}`,
+                    stopReason: StopReason.STOP_PATTERN,
+                  }),
+                  true
+                );
+                controller.enqueue(f);
+                controller.close();
+              }, 200);
+            },
+          });
+          return new Response(slowStream, { status: 200 });
+        }
+
+        // Request 3: fast (immediate stream) — should win the race
+        const f1 = buildConnectFrame(
+          toBinary(GetChatMessageResponseSchema, {
+            deltaText: "fast_response",
+            stopReason: StopReason.STOP_PATTERN,
+          }),
+          true
+        );
+        return new Response(createMockStream([f1]), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const result = await executor.execute({
+      model: "devin/swe-1-6",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      credentials: { apiKey: "tok" },
+    });
+
+    const events = await readSseResponse(result.response);
+    const parsedChunks = events.slice(0, -1).map((e) => JSON.parse(e));
+
+    // 3 hedged GetChatMessage + 1 GetUserJwt = 4 total calls
+    expect(proxyFetchSpy).toHaveBeenCalledTimes(4);
+
+    // The fast (3rd) request should win — its content appears in the response
+    const textChunks = parsedChunks.filter(c => c.choices[0].delta.content);
+    expect(textChunks.length).toBeGreaterThan(0);
+    expect(textChunks[0].choices[0].delta.content).toBe("fast_response");
+  });
+
+  it("hedgeCount: DEVIN_HEDGE env overrides, SWE models default to 3, others to 1", () => {
+    const saved = process.env.DEVIN_HEDGE;
+
+    delete process.env.DEVIN_HEDGE;
+    expect(executor.hedgeCount("swe-1-6")).toBe(3);
+    expect(executor.hedgeCount("swe-2-high")).toBe(3);
+    expect(executor.hedgeCount("claude-sonnet-4-5")).toBe(1);
+    expect(executor.hedgeCount("adaptive")).toBe(1);
+
+    process.env.DEVIN_HEDGE = "2";
+    expect(executor.hedgeCount("swe-1-6")).toBe(2);
+    expect(executor.hedgeCount("claude-sonnet-4-5")).toBe(2);
+
+    process.env.DEVIN_HEDGE = "1";
+    expect(executor.hedgeCount("swe-1-6")).toBe(1);
+
+    process.env.DEVIN_HEDGE = "10"; // out of range → 1
+    expect(executor.hedgeCount("swe-1-6")).toBe(1);
+
+    process.env.DEVIN_HEDGE = "abc"; // invalid → 1
+    expect(executor.hedgeCount("swe-1-6")).toBe(1);
+
+    if (saved === undefined) delete process.env.DEVIN_HEDGE;
+    else process.env.DEVIN_HEDGE = saved;
   });
 });
 

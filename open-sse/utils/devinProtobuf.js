@@ -15,6 +15,9 @@ export const DEVIN_ASSIGN_MODEL_PATH = "/exa.api_server_pb.ApiServerService/Assi
 export const DEVIN_USER_STATUS_PATH = "/exa.seat_management_pb.SeatManagementService/GetUserStatus";
 export const DEVIN_CLI_MODEL_CONFIGS_PATH = "/exa.api_server_pb.ApiServerService/GetCliModelConfigs";
 
+/** Terminal stop patterns the released devin-cli (chisel) always sends in CompletionConfiguration. */
+export const DEVIN_DEFAULT_STOP_PATTERNS = ["<|user|>", "<|bot|>", "<|context_request|>", "<|endoftext|>", "<|end_of_turn|>"];
+
 export const MAX_CONNECT_FRAME_PAYLOAD = 16 * 1024 * 1024; // 16 MiB
 export const MAX_DECOMPRESSED_PAYLOAD = 16 * 1024 * 1024; // 16 MiB
 
@@ -29,9 +32,7 @@ export const ChatMessageSource = {
 
 export const ChatMessageRequestType = {
   UNSPECIFIED: 0,
-  CASCADE: 3,
-  // Chat protocol used by devin-cli (chisel) ≥3000.10: replaces CASCADE for GetChatMessage.
-  CHAT: 5,
+  CASCADE: 5,
 };
 
 export const ConversationalPlannerMode = {
@@ -603,7 +604,9 @@ export function normalizeDevinSessionToken(token) {
 }
 
 export function devinCliMetadata(apiKey, userJwt = "") {
-  const ideVersion = process.env.DEVIN_IDE_VERSION || "3000.10.23";
+  // Released devin-cli (chisel) request identity: the backend gates AssignModel
+  // (router assignment) and the CASCADE model surface on this tuple.
+  const ideVersion = process.env.DEVIN_IDE_VERSION || "3000.6.2";
   return {
     ideName: "devin-cli",
     ideType: "chisel",
@@ -914,6 +917,7 @@ export const AssignModelRequestSchema = {
     { no: 1, name: "metadata", kind: "message", T: () => MetadataSchema },
     { no: 2, name: "modelRouterUid", kind: "string" },
     { no: 3, name: "cascadeId", kind: "string" },
+    { no: 5, name: "chatMessagePrompt", kind: "message", T: () => ChatMessagePromptSchema },
   ],
 };
 

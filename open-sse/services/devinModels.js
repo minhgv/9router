@@ -11,6 +11,7 @@
 import {
   DEVIN_DEFAULT_BASE_URL,
   DEVIN_CLI_MODEL_CONFIGS_PATH,
+  DisplayOption,
   GetCliModelConfigsRequestSchema,
   GetCliModelConfigsResponseSchema,
   toBinary,
@@ -36,10 +37,12 @@ function encodeCliModelConfigsRequest(sessionToken) {
   const metadata = devinDiscoveryMetadata(sessionToken);
   return toBinary(GetCliModelConfigsRequestSchema, { metadata });
 }
-
 /**
  * Map raw clientModelConfigs to dashboard model entries.
- * Keeps only chat-usable entries (modelInfo.modelType CHAT = 2).
+ * Keeps only chat-usable entries (modelInfo.modelType CHAT = 2). The router
+ * semantic (displayOption MODEL_ROUTER or modelInfo.isModelRouter) and the
+ * parallel-tool capability are preserved so execution metadata stays coherent
+ * with the static registry.
  */
 export function parseDevinModelConfigs(response) {
   const configs = Array.isArray(response?.clientModelConfigs) ? response.clientModelConfigs : [];
@@ -62,6 +65,10 @@ export function parseDevinModelConfigs(response) {
       ...(features.supportsImages ? { supportsImages: true } : {}),
       ...(features.supportsThinking ? { supportsThinking: true } : {}),
       ...(features.supportsToolCalls === false ? { supportsToolCalls: false } : {}),
+      ...(features.supportsParallelToolCalls ? { supportsParallelToolCalls: true } : {}),
+      ...((cfg.modelInfo?.displayOption === DisplayOption.MODEL_ROUTER || cfg.modelInfo?.isModelRouter === true)
+        ? { modelRouter: true }
+        : {}),
       ...(cfg.modelInfo?.modelFamilyUid ? { family: cfg.modelInfo.modelFamilyUid } : {}),
       ...(cfg.isRecommended ? { isRecommended: true } : {}),
     });

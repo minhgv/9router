@@ -21,6 +21,7 @@ import {
   ConversationalPlannerMode,
   PromptCacheType,
   StopReason,
+  AssignModelRequestSchema,
   GetChatMessageRequestSchema,
   GetChatMessageResponseSchema,
   GetUserJwtRequestSchema,
@@ -293,6 +294,12 @@ describe("devinProtobuf", () => {
       const binary = toBinary(GetChatMessageRequestSchema, request);
       const tags = scanTags(binary);
 
+      const requestType = tags.find((t) => t.fieldNo === 7);
+      expect(requestType).toBeDefined();
+      expect(requestType.wireType).toBe(0);
+      expect(requestType.value).toBe(5);
+      expect(ChatMessageRequestType.CASCADE).toBe(5);
+
       const planner = tags.find((t) => t.fieldNo === 20);
       expect(planner).toBeDefined();
       expect(planner.wireType).toBe(0);
@@ -307,9 +314,59 @@ describe("devinProtobuf", () => {
       expect(execution.wireType).toBe(2);
 
       const decoded = fromBinary(GetChatMessageRequestSchema, binary);
+      expect(decoded.requestType).toBe(ChatMessageRequestType.CASCADE);
       expect(decoded.plannerMode).toBe(ConversationalPlannerMode.DEFAULT);
       expect(decoded.cascadeId).toBe("cascade-id-16-check");
       expect(decoded.executionId).toBe("execution-id-22-check");
+    });
+    it("encodes AssignModelRequest with the router prompt at field 5 (manual tag scan)", () => {
+      const request = {
+        metadata: devinCliMetadata("assign_key"),
+        modelRouterUid: "adaptive",
+        cascadeId: "cascade-assign-42",
+        chatMessagePrompt: {
+          messageId: "",
+          source: ChatMessageSource.USER,
+          prompt: "route me",
+          images: [{ base64Data: "aW1hZ2VkYXRh", mimeType: "image/png", caption: "" }],
+        },
+      };
+      const binary = toBinary(AssignModelRequestSchema, request);
+      const tags = scanTags(binary);
+
+      // Field 5 carries the router-scoring prompt; a codec that drops it makes
+      // the router score an empty turn.
+      const promptTags = tags.filter((t) => t.fieldNo === 5);
+      expect(promptTags).toHaveLength(1);
+      expect(promptTags[0].wireType).toBe(2);
+      expect(tags.find((t) => t.fieldNo === 4)).toBeUndefined();
+
+      const decoded = fromBinary(AssignModelRequestSchema, binary);
+      expect(decoded.modelRouterUid).toBe("adaptive");
+      expect(decoded.cascadeId).toBe("cascade-assign-42");
+      expect(decoded.metadata.apiKey).toBe("devin-session-token$assign_key");
+      expect(decoded.chatMessagePrompt.messageId ?? "").toBe("");
+      expect(decoded.chatMessagePrompt).toMatchObject({
+        source: ChatMessageSource.USER,
+        prompt: "route me",
+      });
+      expect(decoded.chatMessagePrompt.images[0]).toMatchObject({
+        mimeType: "image/png",
+        base64Data: "aW1hZ2VkYXRh",
+      });
+    });
+
+    it("omits field 5 entirely when no router prompt is supplied", () => {
+      const binary = toBinary(AssignModelRequestSchema, {
+        metadata: devinCliMetadata("k"),
+        modelRouterUid: "adaptive",
+        cascadeId: "cascade-1",
+      });
+      expect(scanTags(binary).find((t) => t.fieldNo === 5)).toBeUndefined();
+
+      const decoded = fromBinary(AssignModelRequestSchema, binary);
+      expect(decoded.modelRouterUid).toBe("adaptive");
+      expect(decoded.chatMessagePrompt).toBeUndefined();
     });
 
     it("exports DisplayOption and DEVIN_SUPPORTED_MODEL_DISPLAYS with metadata passthrough", () => {
@@ -472,9 +529,8 @@ describe("devinProtobuf", () => {
       const metaDefault = devinCliMetadata("my_key", "jwt_abc");
       expect(metaDefault.ideName).toBe("devin-cli");
       expect(metaDefault.ideType).toBe("chisel");
-      expect(metaDefault.ideVersion).toBe("3000.10.23");
       expect(metaDefault.extensionName).toBe("chisel");
-      expect(metaDefault.extensionVersion).toBe("3000.10.23");
+      expect(metaDefault.extensionVersion).toBe(metaDefault.ideVersion);
       expect(metaDefault.apiKey).toBe("devin-session-token$my_key");
       expect(metaDefault.userJwt).toBe("jwt_abc");
 

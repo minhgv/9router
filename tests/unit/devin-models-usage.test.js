@@ -70,6 +70,68 @@ describe("devinModels service", () => {
     });
   });
 
+  it("preserves the router flag from displayOption or isModelRouter only", () => {
+    const models = parseDevinModelConfigs({
+      clientModelConfigs: [
+        { label: "Adaptive", modelUid: "adaptive", modelInfo: { modelType: 2, displayOption: 3 } },
+        { label: "Flagged", modelUid: "flagged-router", modelInfo: { modelType: 2, isModelRouter: true } },
+        { label: "Plain", modelUid: "plain-chat", modelInfo: { modelType: 2 } },
+      ],
+    });
+
+    expect(models.map((m) => m.id)).toEqual(["adaptive", "flagged-router", "plain-chat"]);
+    // displayOption 3 (DisplayOption.MODEL_ROUTER) and isModelRouter are the
+    // two wire representations of a router; plain entries carry no flag.
+    expect(models.map((m) => m.modelRouter)).toEqual([true, true, undefined]);
+  });
+
+  it("preserves parallel tool-call capability from model features", () => {
+    const models = parseDevinModelConfigs({
+      clientModelConfigs: [
+        {
+          label: "SWE-2 High",
+          modelUid: "swe-2-high",
+          modelInfo: { modelType: 2, modelFeatures: { supportsParallelToolCalls: true } },
+        },
+        {
+          label: "Serial",
+          modelUid: "serial-lane",
+          modelInfo: { modelType: 2, modelFeatures: { supportsParallelToolCalls: false } },
+        },
+      ],
+    });
+
+    expect(models.map((m) => m.supportsParallelToolCalls)).toEqual([true, undefined]);
+  });
+
+  it("round-trips router and parallel-call flags through the protobuf wire", async () => {
+    const wire = {
+      clientModelConfigs: [
+        {
+          label: "Adaptive",
+          creditMultiplier: 1.5,
+          isRecommended: true,
+          modelUid: "adaptive",
+          modelInfo: {
+            modelType: 2,
+            displayOption: 3,
+            isModelRouter: true,
+            modelFeatures: { supportsParallelToolCalls: true },
+          },
+        },
+      ],
+    };
+    const fetchFn = vi.fn().mockResolvedValue(protobufResponse(GetCliModelConfigsResponseSchema, wire));
+
+    const decoded = await fetchDevinCliModelConfigs(SESSION_TOKEN, { fetchFn });
+
+    expect(parseDevinModelConfigs(decoded)[0]).toMatchObject({
+      id: "adaptive",
+      modelRouter: true,
+      supportsParallelToolCalls: true,
+    });
+  });
+
   it("round-trips a protobuf-encoded GetCliModelConfigs response through fetch", async () => {
     const wire = {
       clientModelConfigs: [

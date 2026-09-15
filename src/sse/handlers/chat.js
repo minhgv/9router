@@ -39,6 +39,18 @@ export async function handleChat(request, clientRawRequest = null) {
     return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");
   }
 
+  // Debug aid: dump the exact client request body when NINEROUTER_DUMP_DIR is set.
+  if (process.env.NINEROUTER_DUMP_DIR) {
+    try {
+      const fs = await import("node:fs");
+      const path = await import("node:path");
+      fs.mkdirSync(process.env.NINEROUTER_DUMP_DIR, { recursive: true });
+      const file = path.join(process.env.NINEROUTER_DUMP_DIR, `${Date.now()}-${(body.model || "unknown").replace(/[^a-zA-Z0-9._-]/g, "_")}.json`);
+      fs.writeFileSync(file, JSON.stringify(body, null, 2));
+      log.info("CHAT", `dumped request body → ${file}`);
+    } catch {}
+  }
+
   // Build clientRawRequest for logging (if not provided)
   if (!clientRawRequest) {
     const url = new URL(request.url);

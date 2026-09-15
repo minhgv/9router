@@ -127,6 +127,20 @@ export const MODEL_PRICING = {
   "minimax-m2.1":                 { input: 0.50,  output: 2.00,  cached: 0.25,  reasoning: 3.00,   cache_creation: 0.50  },
   "minimax-m2.5":                 { input: 0.60,  output: 2.40,  cached: 0.30,  reasoning: 3.60,   cache_creation: 0.60  },
 
+  // === Devin (Cognition) — Cascade swe models ===
+  // Metered Enterprise rates per model. Pro plan: swe-2 variants, swe-1-7 variants
+  // (non-lightning), and swe-check are included (no metered cost beyond plan credits).
+  "swe-2-high":                   { input: 0.75, output: 3.75,  cached: 0.075 },
+  "swe-2-medium":                 { input: 0.75, output: 3.75,  cached: 0.075 },
+  "swe-2-max":                    { input: 0.75, output: 3.75,  cached: 0.075 },
+  "swe-1-7":                      { input: 0.50, output: 2.50,  cached: 0.20 },
+  "swe-1-7-medium":               { input: 0.50, output: 2.50,  cached: 0.20 },
+  "swe-1-7-lightning":            { input: 2.50, output: 12.50, cached: 1.00 },
+  "swe-1-7-lightning-medium":     { input: 2.50, output: 12.50, cached: 1.00 },
+  "swe-check":                    { input: 0.00, output: 0.00,  cached: 0.00 },
+  "swe-1-6":                      { input: 0.50, output: 2.50,  cached: 0.20 },
+  "swe-1-6-fast":                 { input: 0.50, output: 2.50,  cached: 0.20 },
+
   // === Grok ===
   "grok-code-fast-1":             { input: 0.50,  output: 2.00,  cached: 0.25,  reasoning: 3.00,   cache_creation: 0.50  },
 

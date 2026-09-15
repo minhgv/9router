@@ -1,5 +1,11 @@
 # Unreleased
 
+## Features
+- **Devin**: re-add Devin (Cognition) as a native provider — Connect/protobuf executor against the Cascade backend (`server.codeium.com`) with per-message SSE streaming, tool calls, thinking deltas, usage/credit accounting and context-overflow classification; new SWE model lineup (SWE-2 High/Medium/Max, SWE-1.7 + Medium/Lightning, SWE-check; SWE-1.6 kept as legacy) with metered pricing from the official model docs
+
+## Removed
+- **Devin**: drop the legacy `devin-cli` subprocess provider and its connection type (superseded by the native executor above)
+
 ## Fixes
 - **Antigravity**: stop sending `requestType: "agent"` in the request envelope — the official consumer Cloud Code client does not send it and the "agent" lane is a rate-limited bucket that trips bare `429 RESOURCE_EXHAUSTED` responses without quota details (parity with the antigravity-opencode client; image/search lanes unchanged)
 - **Antigravity**: send clean wire model ids (no synthetic `(tier)` suffix, which upstream rejects as 404 on some lanes), map `gemini-3.5-flash-high`/`gemini-3.1-pro` to the real agent ids, and carry the thinking tier in `generationConfig.thinkingConfig.thinkingLevel` (`HIGH`/`MEDIUM`/`LOW` + `includeThoughts`) exactly like the official client

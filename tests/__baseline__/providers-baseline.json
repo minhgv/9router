@@ -1033,5 +1033,9 @@
       "preserveCacheControl": true
     },
     "format": "openai"
+  },
+  "devin": {
+    "baseUrl": "https://server.codeium.com",
+    "format": "openai"
   }
 }

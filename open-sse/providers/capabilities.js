@@ -131,6 +131,19 @@ export const MODEL_CAPABILITIES = {
   // via OpenAI Responses input_image; reasoning supports up to xhigh.
   "muse-spark-1.2-contributor-free": { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 },
   "muse-spark-1.3-contributor-free": { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 },
+
+  // Devin (Cognition) Cascade swe models — text-only (image-blind upstream),
+  // stream reasoning via deltaThinking. 200k context; legacy output caps 64k/128k.
+  "swe-2-high":               { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
+  "swe-2-medium":             { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
+  "swe-2-max":                { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
+  "swe-1-7":                  { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
+  "swe-1-7-medium":           { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
+  "swe-1-7-lightning":        { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
+  "swe-1-7-lightning-medium": { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
+  "swe-check":                { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
+  "swe-1-6":                  { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 64000 },
+  "swe-1-6-fast":             { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 128000 },
 };
 
 const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };

@@ -1072,6 +1072,7 @@ function raceHedgedStreams(responses, controllers, { signal, log }) {
             }
 
             if (foundData) {
+              if (winner !== -1) return; // another reader already won
               winner = i;
               winnerReader = reader;
               // Abort all losers
@@ -1081,7 +1082,6 @@ function raceHedgedStreams(responses, controllers, { signal, log }) {
               // Forward all buffered raw bytes (re-parsed by createSseStream)
               enqueue(buffers[i]);
               buffers[i] = Buffer.alloc(0);
-              log?.debug?.("DEVIN", `Hedge race: request #${i} won`);
               break;
             }
           }
@@ -1100,7 +1100,6 @@ function raceHedgedStreams(responses, controllers, { signal, log }) {
           // loser error (abort) — expected, swallow
         }
       }
-
       try {
         const results = await Promise.allSettled(readers.map((_, i) => runReader(i)));
 

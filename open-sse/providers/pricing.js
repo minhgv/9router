@@ -141,6 +141,22 @@ export const MODEL_PRICING = {
   "swe-1-6":                      { input: 0.50, output: 2.50,  cached: 0.20 },
   "swe-1-6-fast":                 { input: 0.50, output: 2.50,  cached: 0.20 },
 
+  // Devin-routed third-party models (subscription/ACU-billed on the Devin
+  // plan — creditMultiplier ACUs per prompt, no per-token metered rate).
+  "adaptive":                     { input: 0.00, output: 0.00, cached: 0.00 },
+  "claude-opus-5-medium":         { input: 0.00, output: 0.00, cached: 0.00 },
+  "claude-fable-5-1-medium":      { input: 0.00, output: 0.00, cached: 0.00 },
+  "claude-sonnet-5-medium":       { input: 0.00, output: 0.00, cached: 0.00 },
+  "gemini-3-8-flash-medium":      { input: 0.00, output: 0.00, cached: 0.00 },
+  "gpt-5-6-sol-medium":           { input: 0.00, output: 0.00, cached: 0.00 },
+  "gpt-5-6-luna-medium":          { input: 0.00, output: 0.00, cached: 0.00 },
+  "gpt-6-astra-medium":           { input: 0.00, output: 0.00, cached: 0.00 },
+  "glm-5-2":                      { input: 0.00, output: 0.00, cached: 0.00 },
+  "glm-5-3-low":                  { input: 0.00, output: 0.00, cached: 0.00 },
+  "glm-5-3-high":                 { input: 0.00, output: 0.00, cached: 0.00 },
+  "glm-5-3-max":                  { input: 0.00, output: 0.00, cached: 0.00 },
+  "kimi-k3-high":                 { input: 0.00, output: 0.00, cached: 0.00 },
+
   // === Grok ===
   "grok-code-fast-1":             { input: 0.50,  output: 2.00,  cached: 0.25,  reasoning: 3.00,   cache_creation: 0.50  },
 

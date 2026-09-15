@@ -13,6 +13,7 @@ export const DEVIN_AUTH_PATH = "/exa.auth_pb.AuthService/GetUserJwt";
 export const DEVIN_CHAT_PATH = "/exa.api_server_pb.ApiServerService/GetChatMessage";
 export const DEVIN_ASSIGN_MODEL_PATH = "/exa.api_server_pb.ApiServerService/AssignModel";
 export const DEVIN_USER_STATUS_PATH = "/exa.seat_management_pb.SeatManagementService/GetUserStatus";
+export const DEVIN_CLI_MODEL_CONFIGS_PATH = "/exa.api_server_pb.ApiServerService/GetCliModelConfigs";
 
 export const MAX_CONNECT_FRAME_PAYLOAD = 16 * 1024 * 1024; // 16 MiB
 export const MAX_DECOMPRESSED_PAYLOAD = 16 * 1024 * 1024; // 16 MiB
@@ -233,7 +234,9 @@ class ProtoReader {
   }
 
   int32() {
-    return (this.uint32() | 0);
+    // proto3 encodes negative int32 as a 10-byte sign-extended varint — decode
+    // through uint64 then truncate, instead of failing the 32-bit varint check.
+    return Number(BigInt.asIntN(32, this.uint64()));
   }
 
   uint64() {

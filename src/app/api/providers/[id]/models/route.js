@@ -12,6 +12,7 @@ import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveClineModels, resolveClinepassModels } from "open-sse/services/clinepassModels.js";
+import { resolveDevinModels } from "open-sse/services/devinModels.js";
 
 const GEMINI_CLI_MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 
@@ -464,6 +465,12 @@ const PROVIDER_MODELS_CONFIG = {
       }
       const data = await response.json();
       return { models: parseOpenAIStyleModels(data) };
+    }
+  },
+  devin: {
+    customResolver: async (connection) => {
+      const proxy = await resolveConnectionProxyConfig(connection.provider, connection.id).catch(() => null);
+      return resolveDevinModels(connection, proxy?.enabled ? { proxyOptions: proxy } : {});
     }
   }
 };

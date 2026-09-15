@@ -133,17 +133,34 @@ export const MODEL_CAPABILITIES = {
   "muse-spark-1.3-contributor-free": { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 },
 
   // Devin (Cognition) Cascade swe models — text-only (image-blind upstream),
-  // stream reasoning via deltaThinking. 200k context; legacy output caps 64k/128k.
-  "swe-2-high":               { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
-  "swe-2-medium":             { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
-  "swe-2-max":                { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
-  "swe-1-7":                  { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
-  "swe-1-7-medium":           { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
-  "swe-1-7-lightning":        { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
-  "swe-1-7-lightning-medium": { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
+  // stream reasoning via deltaThinking. Context/output caps from
+  // GetCliModelConfigs (2026-09 capture); legacy output caps 64k/128k.
+  "swe-2-high":               { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
+  "swe-2-medium":             { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
+  "swe-2-max":                { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
+  "swe-1-7":                  { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
+  "swe-1-7-medium":           { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
+  "swe-1-7-lightning":        { reasoning: true, thinkingFormat: "openai", contextWindow: 202752 },
+  "swe-1-7-lightning-medium": { reasoning: true, thinkingFormat: "openai", contextWindow: 202752 },
   "swe-check":                { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
   "swe-1-6":                  { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 64000 },
   "swe-1-6-fast":             { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 128000 },
+
+  // Devin-routed third-party models (recommended picker entries) — caps and
+  // vision flags from the same discovery payload. GLM entries are text-only.
+  "adaptive":                 { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
+  "claude-opus-5-medium":     { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+  "claude-fable-5-1-medium":  { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+  "claude-sonnet-5-medium":   { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+  "gemini-3-8-flash-medium":  { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 65535 },
+  "gpt-5-6-sol-medium":       { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+  "gpt-5-6-luna-medium":      { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+  "gpt-6-astra-medium":       { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+  "glm-5-2":                  { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 128000 },
+  "glm-5-3-low":              { reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 128000 },
+  "glm-5-3-high":             { reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 128000 },
+  "glm-5-3-max":              { reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 128000 },
+  "kimi-k3-high":             { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 },
 };
 
 const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };

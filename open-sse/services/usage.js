@@ -18,6 +18,7 @@ import { getOpenCodeGoUsage } from "./usage/opencode-go.js";
 import { getGroqUsage } from "./usage/groq.js";
 import { getZedUsage } from "./usage/zed.js";
 import { getXiaomiMimoUsage } from "./usage/xiaomi-mimo.js";
+import { getDevinUsage } from "./usage/devin.js";
 import { resolveQoderCredentials } from "./qoderModels.js";
 import { getGlmUsage } from "./usage/glm.js";
 import {
@@ -62,6 +63,7 @@ const USAGE_HANDLERS = {
   groq: (c) => getGroqUsage(c.apiKey, c.proxyOptions),
   zed: (c) => getZedUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
   "xiaomi-mimo": (c) => getXiaomiMimoUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
+  devin: (c) => getDevinUsage(c.accessToken || c.apiKey, c.providerSpecificData, c.proxyOptions),
 };
 
 export async function getUsageForProvider(connection, proxyOptions = null, options = {}) {

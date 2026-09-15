@@ -112,7 +112,7 @@ describe("DevinExecutor Registration & Provider Config", () => {
     });
 
     const models = PROVIDER_MODELS.dv;
-    expect(models).toHaveLength(10);
+    expect(models).toHaveLength(23);
     expect(models.map((m) => m.id)).toEqual([
       "swe-2-high",
       "swe-2-medium",
@@ -121,6 +121,19 @@ describe("DevinExecutor Registration & Provider Config", () => {
       "swe-1-7-medium",
       "swe-1-7-lightning",
       "swe-1-7-lightning-medium",
+      "adaptive",
+      "claude-opus-5-medium",
+      "claude-fable-5-1-medium",
+      "claude-sonnet-5-medium",
+      "gemini-3-8-flash-medium",
+      "gpt-5-6-sol-medium",
+      "gpt-5-6-luna-medium",
+      "gpt-6-astra-medium",
+      "glm-5-2",
+      "glm-5-3-low",
+      "glm-5-3-high",
+      "glm-5-3-max",
+      "kimi-k3-high",
       "swe-check",
       "swe-1-6",
       "swe-1-6-fast",
@@ -128,14 +141,14 @@ describe("DevinExecutor Registration & Provider Config", () => {
     expect(models[0]).toMatchObject({
       id: "swe-2-high",
       name: "SWE-2 High",
-      contextLength: 200000,
+      contextLength: 262000,
     });
-    expect(models[8]).toMatchObject({
+    expect(models[21]).toMatchObject({
       id: "swe-1-6",
       name: "SWE-1.6",
       contextLength: 200000,
     });
-    expect(models[9]).toMatchObject({
+    expect(models[22]).toMatchObject({
       id: "swe-1-6-fast",
       name: "SWE-1.6 Fast",
       contextLength: 200000,

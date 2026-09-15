@@ -688,9 +688,17 @@ describe("DevinExecutor Execution & Wire Protocol", () => {
       credentials: { apiKey: "tok" },
     });
 
-    await expect(readSseResponse(result.response)).rejects.toThrow(
-      /Devin stream error \[permission_denied\]: User session expired or unauthorized/
-    );
+    // Upstream trailer errors must surface as a well-formed SSE error event +
+    // [DONE] (kiro-style), NOT a rejected stream: erroring the body makes
+    // Next.js "failed to pipe response" and drop the connection with zero bytes.
+    const events = await readSseResponse(result.response);
+    expect(events[events.length - 1]).toBe("[DONE]");
+    expect(JSON.parse(events[events.length - 2])).toEqual({
+      error: {
+        message: "Devin stream error [permission_denied]: User session expired or unauthorized",
+        type: "upstream_error",
+      },
+    });
   });
 
   it("classifies pre-first-token trailer invalid_argument with >=512KiB history as context-overflow", async () => {
@@ -727,9 +735,14 @@ describe("DevinExecutor Execution & Wire Protocol", () => {
       credentials: { apiKey: "tok" },
     });
 
-    await expect(readSseResponse(result.response)).rejects.toThrow(
-      /Devin context overflow error: Internal error during cascade execution/
-    );
+    const events2 = await readSseResponse(result.response);
+    expect(events2[events2.length - 1]).toBe("[DONE]");
+    expect(JSON.parse(events2[events2.length - 2])).toEqual({
+      error: {
+        message: "Devin context overflow error: Internal error during cascade execution",
+        type: "upstream_error",
+      },
+    });
   });
 
   it("aborts mid-stream: reader cancelled, clean error, no retry", async () => {

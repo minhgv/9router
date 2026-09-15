@@ -612,7 +612,19 @@ export class DevinExecutor extends BaseExecutor {
         } catch (err) {
           log?.error?.("DEVIN", "Stream error:", err);
           try {
-            controller.error(err);
+            // App-level upstream errors (e.g. Connect trailer [unavailable]) must
+            // NOT error the stream: Next.js turns that into "failed to pipe
+            // response" and drops the connection before any byte reaches the
+            // client (curl 52 empty reply). Emit a well-formed SSE error event +
+            // [DONE] instead — same pattern as the kiro integrity gate. The
+            // forced SSE→JSON non-stream path surfaces chunk.error as 502 JSON.
+            if (err?.name === "AbortError" || signal?.aborted) {
+              controller.error(err);
+            } else {
+              emit(`data: ${JSON.stringify({ error: { message: err?.message || "Devin stream error", type: "upstream_error" } })}\n\n`);
+              emit(SSE_DONE);
+              controller.close();
+            }
           } catch {}
         } finally {
           signal?.removeEventListener("abort", abortHandler);

@@ -290,6 +290,13 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   if (contentType.includes("text/event-stream")) {
     const sseText = await providerResponse.text();
     const parsed = parseSSEToOpenAIResponse(sseText, model);
+    if (parsed?.error) {
+      // SSE error event (e.g. devin/kiro upstream failure surfaced mid-stream):
+      // propagate as a real HTTP error instead of a 200 with an error body —
+      // mirrors the forced-SSE→JSON path in sseToJsonHandler.
+      appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
+      return createErrorResult(HTTP_STATUS.BAD_GATEWAY, parsed.error.message || "Upstream SSE stream failed");
+    }
     if (!parsed) {
       appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
       return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Invalid SSE response for non-streaming request");

@@ -10,6 +10,7 @@
 - **Devin**: drop the legacy `devin-cli` subprocess provider and its connection type (superseded by the native executor above)
 
 ## Fixes
+- **Devin**: upstream errors that arrive mid-stream (e.g. Connect trailer `unavailable` when Devin's third-party model provider is down) are now surfaced to the client as a well-formed SSE `error` event + `[DONE]` (kiro-style) instead of erroring the response stream — the old path made Next.js abort with "failed to pipe response" and curl/clients saw an empty reply with no status; non-stream requests now map the SSE error event to a proper `502` JSON error (and re-enable account fallback)
 - **Devin**: protobuf `int32` fields now decode through the 64-bit varint path — proto3 sign-extends negative values to 10-byte varints (e.g. `monthlyPromptCredits: -1`), which previously crashed GetUserStatus decoding with "Varint exceeds 32 bits"
 - **Devin**: switch chat requests to the CHAT protocol (`requestType: 5`) used by devin-cli ≥3000.10 — the legacy CASCADE (3) payload with `stopPatterns`/`firstTemperature`/`fimEotProbThreshold`/`toolChoice`/`systemPromptCacheOptions`/`executionId` is now rejected upstream (`failed_precondition`); configuration now mirrors the CLI (`maxTokens` 128000 default, `maxNewlines` 400, `topK` 40, `topP` 0.95) and AssignModel is never called (wire-capture verified against the real CLI)
 - **Devin**: registry category fixed to `oauth` (was a non-existent `subscription` bucket) so the provider appears in the dashboard's OAuth login list

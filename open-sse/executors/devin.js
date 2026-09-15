@@ -16,7 +16,6 @@ import {
   ChatMessageSource,
   ChatMessageRequestType,
   ConversationalPlannerMode,
-  PromptCacheType,
   StopReason,
   GetChatMessageRequestSchema,
   GetChatMessageResponseSchema,
@@ -33,15 +32,9 @@ import {
   deterministicUuid,
 } from "../utils/devinProtobuf.js";
 
-const DEFAULT_MAX_TOKENS = 64000;
-const DEFAULT_TEMPERATURE = 0.4;
-const DEFAULT_STOP_PATTERNS = [
-  "<|user|>",
-  "<|bot|>",
-  "<|context_request|>",
-  "<|endoftext|>",
-  "<|end_of_turn|>",
-];
+const DEFAULT_MAX_TOKENS = 128000;
+const DEFAULT_TEMPERATURE = 1;
+const DEFAULT_TOP_P = 0.95;
 
 export class DevinExecutor extends BaseExecutor {
   constructor() {
@@ -115,17 +108,14 @@ export class DevinExecutor extends BaseExecutor {
           log,
           proxyOptions,
         });
-
         // Step 2: Build GetChatMessageRequest
         const cascadeId = crypto.randomUUID();
-        const executionId = crypto.randomUUID();
         const requestPayload = this.buildChatPayload({
           body,
           model: wireModel,
           sessionToken,
           userJwt,
           cascadeId,
-          executionId,
         });
 
         const protoBinary = toBinary(GetChatMessageRequestSchema, requestPayload);
@@ -243,22 +233,20 @@ export class DevinExecutor extends BaseExecutor {
     return { userJwt: decoded.userJwt.trim(), chatBaseUrl };
   }
 
-  buildChatPayload({ body, model, sessionToken, userJwt, cascadeId, executionId }) {
+  /**
+   * Builds GetChatMessageRequest for the CHAT protocol (requestType 5) used by
+   * devin-cli (chisel) >= 3000.10. Ground truth from wire capture of the real CLI:
+   * no AssignModel / modelAssignmentJwt, no toolChoice / systemPromptCacheOptions /
+   * executionId / disableParallelToolCalls, no stopPatterns / firstTemperature /
+   * fimEotProbThreshold in configuration. Unknown fields are rejected upstream.
+   */
+  buildChatPayload({ body, model, sessionToken, userJwt, cascadeId }) {
     const rawMessages = Array.isArray(body.messages) ? body.messages : [];
     const { prompt, chatMessagePrompts } = this.mapMessages(rawMessages, cascadeId);
 
     const maxTokens = body.max_tokens ?? body.max_completion_tokens ?? DEFAULT_MAX_TOKENS;
     const temp = body.temperature ?? DEFAULT_TEMPERATURE;
-    const topP = body.top_p ?? 1.0;
-
-    const stopPatterns = [...DEFAULT_STOP_PATTERNS];
-    if (body.stop) {
-      if (Array.isArray(body.stop)) {
-        stopPatterns.push(...body.stop);
-      } else if (typeof body.stop === "string") {
-        stopPatterns.push(body.stop);
-      }
-    }
+    const topP = body.top_p ?? DEFAULT_TOP_P;
 
     const tools = (body.tools || []).map((t) => {
       const fn = t.function || t;
@@ -276,28 +264,17 @@ export class DevinExecutor extends BaseExecutor {
       chatMessagePrompts,
       chatModelUid: model,
       plannerMode: ConversationalPlannerMode.DEFAULT,
-      requestType: ChatMessageRequestType.CASCADE,
+      requestType: ChatMessageRequestType.CHAT,
       configuration: {
         numCompletions: 1n,
         maxTokens: BigInt(maxTokens),
-        maxNewlines: 200n,
+        maxNewlines: 400n,
         temperature: temp,
-        firstTemperature: temp,
-        topK: 50n,
+        topK: 40n,
         topP,
-        stopPatterns,
-        fimEotProbThreshold: 1.0,
       },
       tools,
-      toolChoice: {
-        optionName: "auto",
-      },
-      systemPromptCacheOptions: {
-        type: PromptCacheType.EPHEMERAL,
-      },
       cascadeId,
-      executionId,
-      disableParallelToolCalls: !(body.parallel_tool_calls ?? true),
     };
   }
 

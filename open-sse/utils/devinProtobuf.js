@@ -11,7 +11,7 @@ export const DEVIN_DEFAULT_BASE_URL = "https://server.codeium.com";
 export const DEVIN_SESSION_TOKEN_PREFIX = "devin-session-token$";
 export const DEVIN_AUTH_PATH = "/exa.auth_pb.AuthService/GetUserJwt";
 export const DEVIN_CHAT_PATH = "/exa.api_server_pb.ApiServerService/GetChatMessage";
-export const DEVIN_MODEL_CONFIGS_PATH = "/exa.api_server_pb.ApiServerService/GetCliModelConfigs";
+export const DEVIN_ASSIGN_MODEL_PATH = "/exa.api_server_pb.ApiServerService/AssignModel";
 export const DEVIN_USER_STATUS_PATH = "/exa.seat_management_pb.SeatManagementService/GetUserStatus";
 
 export const MAX_CONNECT_FRAME_PAYLOAD = 16 * 1024 * 1024; // 16 MiB
@@ -29,6 +29,8 @@ export const ChatMessageSource = {
 export const ChatMessageRequestType = {
   UNSPECIFIED: 0,
   CASCADE: 3,
+  // Chat protocol used by devin-cli (chisel) ≥3000.10: replaces CASCADE for GetChatMessage.
+  CHAT: 5,
 };
 
 export const ConversationalPlannerMode = {
@@ -598,7 +600,7 @@ export function normalizeDevinSessionToken(token) {
 }
 
 export function devinCliMetadata(apiKey, userJwt = "") {
-  const ideVersion = process.env.DEVIN_IDE_VERSION || "3000.6.2";
+  const ideVersion = process.env.DEVIN_IDE_VERSION || "3000.10.23";
   return {
     ideName: "devin-cli",
     ideType: "chisel",
@@ -891,6 +893,31 @@ export const GetUserJwtResponseSchema = {
   fields: [
     { no: 1, name: "userJwt", kind: "string" },
     { no: 2, name: "customApiServerUrl", kind: "string" },
+  ],
+};
+
+export const ModelAssignmentSchema = {
+  typeName: "exa.api_server_pb.ModelAssignment",
+  fields: [
+    { no: 1, name: "assignmentJwt", kind: "string" },
+    { no: 2, name: "modelUid", kind: "string" },
+    { no: 3, name: "harnessUids", kind: "string", repeat: true },
+  ],
+};
+
+export const AssignModelRequestSchema = {
+  typeName: "exa.api_server_pb.AssignModelRequest",
+  fields: [
+    { no: 1, name: "metadata", kind: "message", T: () => MetadataSchema },
+    { no: 2, name: "modelRouterUid", kind: "string" },
+    { no: 3, name: "cascadeId", kind: "string" },
+  ],
+};
+
+export const AssignModelResponseSchema = {
+  typeName: "exa.api_server_pb.AssignModelResponse",
+  fields: [
+    { no: 1, name: "assignment", kind: "message", T: () => ModelAssignmentSchema },
   ],
 };
 

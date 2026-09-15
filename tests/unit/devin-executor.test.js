@@ -22,6 +22,7 @@ import {
   DEVIN_DEFAULT_BASE_URL,
   DEVIN_AUTH_PATH,
   DEVIN_CHAT_PATH,
+  ChatMessageRequestType,
   ChatMessageSource,
   ConversationalPlannerMode,
   StopReason,
@@ -468,14 +469,24 @@ describe("DevinExecutor Execution & Wire Protocol", () => {
     expect(req.chatMessagePrompts[4].source).toBe(ChatMessageSource.USER);
     expect(req.chatMessagePrompts[4].prompt).toBe("What was inside?");
 
-    // Fresh cascadeId and executionId
+    // Fresh cascadeId (CHAT protocol carries no executionId)
     expect(req.cascadeId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
     );
-    expect(req.executionId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-    );
-    expect(req.cascadeId).not.toBe(req.executionId);
+    expect(req.executionId).toBeUndefined();
+
+    // CHAT protocol (requestType 5) with the devin-cli configuration shape
+    expect(req.requestType).toBe(ChatMessageRequestType.CHAT);
+    expect(req.configuration.numCompletions).toBe(1n);
+    expect(req.configuration.maxNewlines).toBe(400n);
+    expect(req.configuration.topK).toBe(40n);
+    expect(req.configuration.stopPatterns).toBeUndefined();
+    expect(req.configuration.firstTemperature).toBeUndefined();
+    expect(req.configuration.fimEotProbThreshold).toBeUndefined();
+    expect(req.toolChoice).toBeUndefined();
+    expect(req.systemPromptCacheOptions).toBeUndefined();
+    expect(req.disableParallelToolCalls).toBeUndefined();
+    expect(req.modelAssignmentJwt).toBeUndefined();
 
     // MessageIds are deterministic UUIDs
     for (const p of req.chatMessagePrompts) {

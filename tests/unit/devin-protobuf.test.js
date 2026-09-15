@@ -102,10 +102,10 @@ describe("devinProtobuf", () => {
       const request = {
         metadata: {
           ideName: "devin-cli",
-          ideVersion: "3000.6.2",
+          ideVersion: "3000.10.23",
           ideType: "chisel",
           extensionName: "chisel",
-          extensionVersion: "3000.6.2",
+          extensionVersion: "3000.10.23",
           apiKey: "devin-session-token$test_key_123",
           locale: "en",
           os: "darwin",
@@ -472,9 +472,9 @@ describe("devinProtobuf", () => {
       const metaDefault = devinCliMetadata("my_key", "jwt_abc");
       expect(metaDefault.ideName).toBe("devin-cli");
       expect(metaDefault.ideType).toBe("chisel");
-      expect(metaDefault.ideVersion).toBe("3000.6.2");
+      expect(metaDefault.ideVersion).toBe("3000.10.23");
       expect(metaDefault.extensionName).toBe("chisel");
-      expect(metaDefault.extensionVersion).toBe("3000.6.2");
+      expect(metaDefault.extensionVersion).toBe("3000.10.23");
       expect(metaDefault.apiKey).toBe("devin-session-token$my_key");
       expect(metaDefault.userJwt).toBe("jwt_abc");
 

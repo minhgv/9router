@@ -937,3 +937,132 @@ export function stopXiaomiMimoProxy() {
   xiaomiMimoSessions.clear();
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Devin fixed-port proxy on 127.0.0.1:59653 (devin-cli/chisel loopback port).
+// Same shape as the xAI proxy: server-side auto-exchange when a session is
+// registered, 302 channel fallback otherwise.
+// ───────────────────────────────────────────────────────────────────────────
+
+let devinProxyServer = null;
+let devinProxyTimeout = null;
+const DEVIN_PROXY_TIMEOUT_MS = 300000; // 5 minutes
+const DEVIN_PROXY_PORT = 59653;
+const devinPendingExchanges = new Map();
+
+export function registerDevinSession({ state, codeVerifier, redirectUri }) {
+  if (!state || !codeVerifier || !redirectUri) return false;
+  devinPendingExchanges.set(state, {
+    codeVerifier,
+    redirectUri,
+    status: "pending",
+    createdAt: Date.now(),
+  });
+  return true;
+}
+
+export function getDevinSessionStatus(state) {
+  return devinPendingExchanges.get(state) || null;
+}
+
+export function clearDevinSession(state) {
+  devinPendingExchanges.delete(state);
+}
+
+export function startDevinProxy(appPort) {
+  return new Promise((resolve) => {
+    if (devinProxyServer) {
+      resolve({ success: true });
+      return;
+    }
+
+    const server = http.createServer(async (req, res) => {
+      const url = new URL(req.url, "http://localhost");
+      if (url.pathname !== "/callback") {
+        res.writeHead(404);
+        res.end("Not found");
+        return;
+      }
+
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
+      const errorParam = url.searchParams.get("error");
+      const session = state ? devinPendingExchanges.get(state) : null;
+
+      // Mode A: server-side exchange
+      if (session) {
+        try {
+          if (errorParam) {
+            throw new Error(url.searchParams.get("error_description") || errorParam);
+          }
+          if (!code) throw new Error("No authorization code received");
+
+          const { exchangeTokens } = await import("../providers.js");
+          const { createProviderConnection } = await import("@/models");
+
+          const tokenData = await exchangeTokens(
+            "devin",
+            code,
+            session.redirectUri,
+            session.codeVerifier,
+            state
+          );
+          const connection = await createProviderConnection({
+            provider: "devin",
+            authType: "oauth",
+            ...tokenData,
+            // Session token does not expire — no expiresAt.
+            expiresAt: null,
+            testStatus: "active",
+          });
+
+          session.status = "done";
+          session.connectionId = connection.id;
+          session.email = connection.email;
+
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(renderCodexResultPage(true, "You can close this window."));
+        } catch (err) {
+          session.status = "error";
+          session.error = err.message;
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(renderCodexResultPage(false, err.message));
+        } finally {
+          stopDevinProxy();
+        }
+        return;
+      }
+
+      // Mode B: legacy fallback redirect
+      const redirectUrl = `http://localhost:${appPort}/callback${url.search}`;
+      res.writeHead(302, { Location: redirectUrl });
+      res.end();
+      stopDevinProxy();
+    });
+
+    server.listen(DEVIN_PROXY_PORT, "127.0.0.1", () => {
+      devinProxyServer = server;
+      devinProxyTimeout = setTimeout(() => stopDevinProxy(), DEVIN_PROXY_TIMEOUT_MS);
+      resolve({ success: true });
+    });
+
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        resolve({ success: false, reason: "port_busy" });
+      } else {
+        resolve({ success: false, reason: err.message });
+      }
+    });
+  });
+}
+
+export function stopDevinProxy() {
+  if (devinProxyTimeout) {
+    clearTimeout(devinProxyTimeout);
+    devinProxyTimeout = null;
+  }
+  if (devinProxyServer) {
+    devinProxyServer.close();
+    devinProxyServer = null;
+  }
+}
+

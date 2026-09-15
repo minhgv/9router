@@ -298,6 +298,8 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         redirectUri = "http://localhost:1455/auth/callback";
       } else if (provider === "xai") {
         redirectUri = "http://127.0.0.1:56121/callback";
+      } else if (provider === "devin") {
+        redirectUri = "http://127.0.0.1:59653/callback";
       } else {
         redirectUri = `http://localhost:${appPort}/callback`;
       }
@@ -354,7 +356,30 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         }
       }
 
-      setAuthData({ ...data, redirectUri, codexServerSide, xaiServerSide });
+      // Devin: same fixed-port server-side proxy pattern as codex (port 59653)
+      let devinProxyActive = false;
+      let devinServerSide = false;
+      if (provider === "devin") {
+        try {
+          const proxyUrl = new URL(`/api/oauth/devin/start-proxy`, window.location.origin);
+          proxyUrl.searchParams.set("app_port", appPort);
+          proxyUrl.searchParams.set("state", data.state);
+          proxyUrl.searchParams.set("code_verifier", data.codeVerifier);
+          proxyUrl.searchParams.set("redirect_uri", redirectUri);
+          const proxyRes = await fetch(proxyUrl.toString());
+          const proxyData = await proxyRes.json();
+          devinProxyActive = proxyData.success;
+          devinServerSide = !!proxyData.serverSide;
+          if (!devinProxyActive && proxyData.reason === "port_busy") {
+            throw new Error("Port 59653 in use (running devin-cli?); close the conflicting process and retry");
+          }
+        } catch (e) {
+          if (e?.message) throw e;
+          devinProxyActive = false;
+        }
+      }
+
+      setAuthData({ ...data, redirectUri, codexServerSide, xaiServerSide, devinServerSide });
 
       // Guard: device_code providers return authUrl:null from /authorize. Never window.open(null)
       // (browsers coerce it to the relative path ".../null").
@@ -380,7 +405,13 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         if (!popupRef.current) {
           setStep("input");
         }
-      } else if (!isLocalhost || provider === "codex" || provider === "xai") {
+      } else if (provider === "devin" && devinProxyActive) {
+        setStep("waiting");
+        popupRef.current = window.open(data.authUrl, "oauth_popup", "width=600,height=700");
+        if (!popupRef.current) {
+          setStep("input");
+        }
+      } else if (!isLocalhost || provider === "codex" || provider === "xai" || provider === "devin") {
         // Non-localhost or proxy failed: manual input mode
         setStep("input");
         window.open(data.authUrl, "_blank");
@@ -430,6 +461,8 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         fetch("/api/oauth/codex/stop-proxy").catch(() => {});
       } else if (provider === "xai") {
         fetch("/api/oauth/xai/stop-proxy").catch(() => {});
+      } else if (provider === "devin") {
+        fetch("/api/oauth/devin/stop-proxy").catch(() => {});
       } else if (provider === "trae") {
         fetch("/api/oauth/trae/stop-proxy").catch(() => {});
       } else if (provider === "windsurf") {
@@ -447,9 +480,11 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       ? "codex"
       : authData?.xaiServerSide
         ? "xai"
-        : authData?.proxyProvider
-          ? authData.proxyProvider
-          : null;
+        : authData?.devinServerSide
+          ? "devin"
+          : authData?.proxyProvider
+            ? authData.proxyProvider
+            : null;
     if (!pollProvider || !authData?.state) return;
     if (callbackProcessedRef.current) return;
     let cancelled = false;
@@ -658,6 +693,8 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       fetch("/api/oauth/codex/stop-proxy").catch(() => {});
     } else if (provider === "xai") {
       fetch("/api/oauth/xai/stop-proxy").catch(() => {});
+    } else if (provider === "devin") {
+      fetch("/api/oauth/devin/stop-proxy").catch(() => {});
     } else if (provider === "trae") {
       fetch("/api/oauth/trae/stop-proxy").catch(() => {});
     } else if (provider === "windsurf") {

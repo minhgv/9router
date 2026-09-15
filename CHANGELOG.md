@@ -2,6 +2,7 @@
 
 ## Features
 - **Devin**: re-add Devin (Cognition) as a native provider — Connect/protobuf executor against the Cascade backend (`server.codeium.com`) with per-message SSE streaming, tool calls, thinking deltas, usage/credit accounting and context-overflow classification; new SWE model lineup (SWE-2 High/Medium/Max, SWE-1.7 + Medium/Lightning, SWE-check; SWE-1.6 kept as legacy) with metered pricing from the official model docs
+- **Devin**: OAuth (PKCE) login mirroring devin-cli — browser authorize at `app.devin.ai/auth/cli/continue` with loopback callback `127.0.0.1:59653/callback`, JSON code exchange at `api.devin.ai/auth/cli/token`; the returned session token (`devin-session-token$…`) is stored as a non-expiring credential (no refresh endpoint — re-login on expiry)
 
 ## Removed
 - **Devin**: drop the legacy `devin-cli` subprocess provider and its connection type (superseded by the native executor above)

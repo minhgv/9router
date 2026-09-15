@@ -30,11 +30,11 @@ import {
   registerWindsurfSession,
   getWindsurfSessionStatus,
   clearWindsurfSession,
-  startZedProxy,
-  stopZedProxy,
-  registerZedSession,
-  getZedSessionStatus,
-  clearZedSession,
+  startDevinProxy,
+  stopDevinProxy,
+  registerDevinSession,
+  getDevinSessionStatus,
+  clearDevinSession,
   startXiaomiMimoProxy,
   stopXiaomiMimoProxy,
   registerXiaomiMimoSession,
@@ -157,8 +157,8 @@ export async function GET(request, { params }) {
         const result = await startXiaomiMimoProxy();
         return NextResponse.json(result);
       }
-      if (!["codex", "xai"].includes(provider)) {
-        return NextResponse.json({ error: "Proxy only supported for codex/xai/trae/windsurf/zed" }, { status: 400 });
+      if (!["codex", "xai", "devin"].includes(provider)) {
+        return NextResponse.json({ error: "Proxy only supported for codex/xai/devin/trae/windsurf/zed" }, { status: 400 });
       }
       const appPort = searchParams.get("app_port");
       if (!appPort) {
@@ -169,12 +169,16 @@ export async function GET(request, { params }) {
       const redirectUri = searchParams.get("redirect_uri");
       const result = provider === "xai"
         ? await startXaiProxy(Number(appPort))
-        : await startCodexProxy(Number(appPort));
+        : provider === "devin"
+          ? await startDevinProxy(Number(appPort))
+          : await startCodexProxy(Number(appPort));
       let serverSide = false;
       if (result.success && state && codeVerifier && redirectUri) {
         serverSide = provider === "xai"
           ? registerXaiSession({ state, codeVerifier, redirectUri })
-          : registerCodexSession({ state, codeVerifier, redirectUri });
+          : provider === "devin"
+            ? registerDevinSession({ state, codeVerifier, redirectUri })
+            : registerCodexSession({ state, codeVerifier, redirectUri });
       }
       return NextResponse.json({ ...result, serverSide });
     }
@@ -189,9 +193,10 @@ export async function GET(request, { params }) {
       else if (provider === "windsurf") session = getWindsurfSessionStatus(state);
       else if (provider === "zed") session = getZedSessionStatus(state);
       else if (provider === "xai") session = getXaiSessionStatus(state);
+      else if (provider === "devin") session = getDevinSessionStatus(state);
       else if (provider === "codex") session = getCodexSessionStatus(state);
       else if (provider === "xiaomi-mimo") session = getXiaomiMimoSessionStatus(state);
-      else return NextResponse.json({ error: "Poll only supported for codex/xai/trae/windsurf/zed/xiaomi-mimo" }, { status: 400 });
+      else return NextResponse.json({ error: "Poll only supported for codex/xai/devin/trae/windsurf/zed/xiaomi-mimo" }, { status: 400 });
       if (!session) return NextResponse.json({ status: "unknown" });
       if (session.status === "done" || session.status === "error") {
         const payload = { ...session };
@@ -209,6 +214,7 @@ export async function GET(request, { params }) {
         else if (provider === "windsurf") clearWindsurfSession(state);
         else if (provider === "zed") clearZedSession(state);
         else if (provider === "xai") clearXaiSession(state);
+        else if (provider === "devin") clearDevinSession(state);
         else clearCodexSession(state);
         return NextResponse.json(payload);
       }
@@ -220,9 +226,10 @@ export async function GET(request, { params }) {
       else if (provider === "windsurf") stopWindsurfProxy();
       else if (provider === "zed") stopZedProxy();
       else if (provider === "xai") stopXaiProxy();
+      else if (provider === "devin") stopDevinProxy();
       else if (provider === "codex") stopCodexProxy();
       else if (provider === "xiaomi-mimo") stopXiaomiMimoProxy();
-      else return NextResponse.json({ error: "Proxy only supported for codex/xai/trae/windsurf/zed/xiaomi-mimo" }, { status: 400 });
+      else return NextResponse.json({ error: "Proxy only supported for codex/xai/devin/trae/windsurf/zed/xiaomi-mimo" }, { status: 400 });
       return NextResponse.json({ success: true });
     }
 

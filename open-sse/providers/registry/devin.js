@@ -26,6 +26,20 @@ export default {
     format: "openai",
   },
 
+  // OAuth PKCE flow mirroring devin-cli (chisel): browser authorize at
+  // app.devin.ai → loopback callback 127.0.0.1:59653/callback?code →
+  // POST api.devin.ai/auth/cli/token {code, code_verifier} → {token}.
+  // The token ("devin-session-token$..." or bare JWT) is a long-lived session
+  // credential — there is no refresh endpoint.
+  oauth: {
+    authorizeUrl: "https://app.devin.ai/auth/cli/continue",
+    tokenUrl: "https://api.devin.ai/auth/cli/token",
+    codeChallengeMethod: "S256",
+    loopbackPort: 59653,
+    callbackPath: "/callback",
+    extraParams: { prompt: "select_account" },
+  },
+
   models: [
     { id: "swe-2-high", name: "SWE-2 High", contextLength: 200000 },
     { id: "swe-2-medium", name: "SWE-2 Medium", contextLength: 200000 },

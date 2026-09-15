@@ -152,6 +152,8 @@ const REFRESH_HANDLERS = {
   clinepass: (c, log) => refreshClineToken(c.refreshToken, log),
   zed: () => refreshZedToken(),
   windsurf: (c, log) => refreshWindsurfToken(c, log),
+  // Devin session tokens are long-lived with no refresh endpoint — re-login is the only path.
+  devin: () => null,
   // Kimi Code OAuth (merged into id `kimi`); legacy id still routes here
   kimi: (c, log) => refreshKimiToken(c.refreshToken, c, log),
   "kimi-coding": (c, log) => refreshKimiToken(c.refreshToken, c, log),

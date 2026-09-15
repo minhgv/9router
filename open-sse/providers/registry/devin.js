@@ -17,8 +17,9 @@ export default {
     website: "https://devin.ai",
   },
 
-  category: "subscription",
+  category: "oauth",
   authType: "oauth",
+  hasOAuth: true,
   authModes: ["oauth", "apikey"],
 
   transport: {

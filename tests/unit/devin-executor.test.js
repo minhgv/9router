@@ -97,7 +97,7 @@ describe("DevinExecutor Registration & Provider Config", () => {
     expect(devinRegistry.alias).toBe("dv");
     expect(devinRegistry.aliases).toContain("devin");
     expect(devinRegistry.uiAlias).toBe("dv");
-    expect(devinRegistry.category).toBe("subscription");
+    expect(devinRegistry.category).toBe("oauth");
     expect(devinRegistry.authType).toBe("oauth");
     expect(devinRegistry.authModes).toEqual(["oauth", "apikey"]);
     expect(devinRegistry.transport.baseUrl).toBe("https://server.codeium.com");

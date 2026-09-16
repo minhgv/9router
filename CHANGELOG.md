@@ -1,5 +1,14 @@
 # Unreleased
 
+## Security
+- **Egress**: connection-proxy policy now reaches every credential-refresh and image-path egress — new shared helper `deriveConnectionProxyOptions(credentials)` (open-sse/utils/proxyFetch.js) wired into `refreshProviderCredentials`, `refreshTokenByProvider` (claude, codex, xai/grok-cli/gcli discovery+token POST, vertex/vertex-partner SA mint, generic `refreshAccessToken`), the codex/default/antigravity executors and the antigravity image adapter; explicitly supplied `proxyOptions` always wins, absent ones derive from the credential's connection settings (videoCore/chatCore call shapes covered by behavioral tests)
+- **Proxy validation**: strict mode rejects invalid proxy URLs (bad scheme, CR/LF, malformed host/port, javascript:, unsupported schemes); non-strict mode falls back to direct with a logged warning; `NO_PROXY` matches by exact host, domain suffix, CIDR or `*` and keeps direct egress even when a proxy is configured (`src/lib/network/proxyTest.js`, `outboundProxy.js`, proxy-pool route)
+- **OAuth callback**: loopback callback pages render sanitized, escaped output — attacker-controlled error/message params can no longer inject HTML; existing OAuth callback consumers enumerated and migrated
+- **Codex**: image prefetch locked to inline-only policy — a failed/unsafe remote fetch drops the image block deterministically instead of falling back to the original remote URL (which leaked it upstream); URL never re-submitted after prefetch failure (`codex-image-policy.test.js`)
+- **Devin**: refresh/redirect targets re-validated against private/loopback/decimal IP ranges before credential send; protobuf frame length capped before allocation/decode (new `devin-url-dns-security` / `devin-protobuf-frame-security` tests)
+- **Usage**: usage-summary API masks API keys consistently with the repo layer (`usageRepo.js` masked-key contract)
+- **Tests**: +19 behavioral hermetic test files across the six provider groups (SEC-01..06, CODEX-01..06, AG-01..04, MIMO-01..06, ANT-01..05, GLM-01..04, DEV-01..04); obsolete URL-fallback assertions removed from codex-image-fetch tests (ratified supersession)
+
 ## Features
 - **Devin**: re-add Devin (Cognition) as a native provider — Connect/protobuf executor against the Cascade backend (`server.codeium.com`) with per-message SSE streaming, tool calls, thinking deltas, usage/credit accounting and context-overflow classification; new SWE model lineup (SWE-2 High/Medium/Max, SWE-1.7 + Medium/Lightning, SWE-check; SWE-1.6 kept as legacy) with metered pricing from the official model docs
 - **Devin**: OAuth (PKCE) login mirroring devin-cli — browser authorize at `app.devin.ai/auth/cli/continue` with loopback callback `127.0.0.1:59653/callback`, JSON code exchange at `api.devin.ai/auth/cli/token`; the returned session token (`devin-session-token$…`) is stored as a non-expiring credential (no refresh endpoint — re-login on expiry)

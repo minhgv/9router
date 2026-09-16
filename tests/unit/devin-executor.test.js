@@ -1190,17 +1190,17 @@ describe("DevinExecutor Execution & Wire Protocol", () => {
       credentials: { apiKey: "tok" },
     });
 
-    // Upstream trailer errors must surface as a well-formed SSE error event +
-    // [DONE] (kiro-style), NOT a rejected stream: erroring the body makes
-    // Next.js "failed to pipe response" and drop the connection with zero bytes.
+    // Upstream trailer errors surface as a well-formed SSE error event and terminate
+    // without appending [DONE] (locked P-DEVIN policy).
     const events = await readSseResponse(result.response);
-    expect(events[events.length - 1]).toBe("[DONE]");
-    expect(JSON.parse(events[events.length - 2])).toEqual({
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0])).toEqual({
       error: {
         message: "Devin stream error [permission_denied]: User session expired or unauthorized",
         type: "upstream_error",
       },
     });
+    expect(events).not.toContain("[DONE]");
   });
 
   it("classifies pre-first-token trailer invalid_argument with >=512KiB history as context-overflow", async () => {
@@ -1238,13 +1238,14 @@ describe("DevinExecutor Execution & Wire Protocol", () => {
     });
 
     const events2 = await readSseResponse(result.response);
-    expect(events2[events2.length - 1]).toBe("[DONE]");
-    expect(JSON.parse(events2[events2.length - 2])).toEqual({
+    expect(events2).toHaveLength(1);
+    expect(JSON.parse(events2[0])).toEqual({
       error: {
         message: "Devin context overflow error: Internal error during cascade execution",
         type: "upstream_error",
       },
     });
+    expect(events2).not.toContain("[DONE]");
   });
 
   it("aborts mid-stream: reader cancelled, clean error, no retry", async () => {
@@ -1584,3 +1585,397 @@ describe("Devin upstream content-policy sanitizer", () => {
     );
   });
 });
+
+describe("Devin Contract Residuals (DEV-01..04)", () => {
+  let executor;
+  let proxyFetchSpy;
+  let savedHedge;
+
+  beforeEach(() => {
+    savedHedge = process.env.DEVIN_HEDGE;
+    process.env.DEVIN_HEDGE = "1";
+    executor = new DevinExecutor();
+    proxyFetchSpy = mocks.proxyAwareFetch;
+    proxyFetchSpy.mockReset();
+  });
+
+  afterEach(() => {
+    if (savedHedge === undefined) delete process.env.DEVIN_HEDGE;
+    else process.env.DEVIN_HEDGE = savedHedge;
+    vi.restoreAllMocks();
+  });
+
+  describe("DEV-01: Model assignment semantics & base URL routing", () => {
+    it("falls back to default base URL when GetUserJwt returns an unsanitary customApiServerUrl", async () => {
+      const calls = [];
+      proxyFetchSpy.mockImplementation(async (url, options) => {
+        calls.push({ url, options });
+        if (url.includes(DEVIN_AUTH_PATH)) {
+          return new Response(
+            toBinary(GetUserJwtResponseSchema, {
+              userJwt: "jwt_sanitary_test",
+              customApiServerUrl: "https://127.0.0.1:8443/evil", // Insecure loopback IP -> rejected
+            }),
+            { status: 200, headers: { "content-type": "application/proto" } }
+          );
+        }
+        if (url.includes(DEVIN_CHAT_PATH)) {
+          const frame = buildConnectFrame(
+            toBinary(GetChatMessageResponseSchema, { deltaText: "Safe fallback" }),
+            false
+          );
+          return new Response(createMockStream([frame]), {
+            status: 200,
+            headers: { "content-type": "application/connect+proto" },
+          });
+        }
+        return new Response("Not found", { status: 404 });
+      });
+
+      const result = await executor.execute({
+        model: "swe-1-7",
+        body: { messages: [{ role: "user", content: "hi" }] },
+        credentials: { apiKey: "tok_test" },
+      });
+
+      const events = await readSseResponse(result.response);
+      expect(events).toContain("[DONE]");
+      expect(calls).toHaveLength(2);
+      // Chat URL must NOT target the rejected customApiServerUrl
+      expect(calls[1].url).toBe(`${DEVIN_DEFAULT_BASE_URL}${DEVIN_CHAT_PATH}`);
+    });
+
+    it("normalizes credentials and session tokens with surrounding whitespace and prefixes", () => {
+      expect(executor.resolveSessionToken({ apiKey: "  my_secret_key  " })).toBe(
+        "devin-session-token$my_secret_key"
+      );
+      expect(
+        executor.resolveSessionToken({ accessToken: "devin-session-token$session_123" })
+      ).toBe("devin-session-token$session_123");
+      expect(executor.resolveSessionToken({})).toBeNull();
+    });
+
+    it("resolves model IDs correctly across alias prefixes", () => {
+      expect(executor.resolveModelId("dv/swe-1-6")).toBe("swe-1-6");
+      expect(executor.resolveModelId("devin/swe-1-7")).toBe("swe-1-7");
+      expect(executor.resolveModelId("swe-1-6")).toBe("swe-1-6");
+      expect(executor.resolveModelId("dv/custom-devin-model")).toBe("custom-devin-model");
+    });
+
+    it("builds the default chat endpoint URL", () => {
+      expect(executor.buildUrl()).toBe(`${DEVIN_DEFAULT_BASE_URL}${DEVIN_CHAT_PATH}`);
+    });
+  });
+
+  describe("DEV-02: Payload framing, generation params, stop patterns, and tool conversions", () => {
+    it("maps temperature, top_p, max_tokens, and stop sequences into GetChatMessageRequest", () => {
+      const payload = executor.buildChatPayload({
+        body: {
+          messages: [{ role: "user", content: "Test prompt" }],
+          temperature: 0.7,
+          top_p: 0.9,
+          max_tokens: 4096,
+          stop: ["###END###", "<custom_stop>"],
+        },
+        model: "swe-1-7",
+        sessionToken: "tok",
+        userJwt: "jwt_val",
+        cascadeId: "c_123",
+      });
+
+      expect(payload.configuration.temperature).toBeCloseTo(0.7);
+      expect(payload.configuration.topP).toBeCloseTo(0.9);
+      expect(payload.configuration.maxTokens).toBe(4096n);
+      expect(payload.configuration.stopPatterns).toContain("###END###");
+      expect(payload.configuration.stopPatterns).toContain("<custom_stop>");
+      expect(payload.configuration.stopPatterns).toContain("<|endoftext|>");
+    });
+
+    it("converts OpenAI function tools into Devin ChatToolDefinition schemas", () => {
+      const payload = executor.buildChatPayload({
+        body: {
+          messages: [{ role: "user", content: "Run tool" }],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "get_weather",
+                description: "Fetches current weather for a given city",
+                parameters: {
+                  type: "object",
+                  properties: { city: { type: "string" } },
+                  required: ["city"],
+                },
+                strict: true,
+              },
+            },
+          ],
+        },
+        model: "swe-1-7",
+        sessionToken: "tok",
+        userJwt: "jwt_val",
+        cascadeId: "c_123",
+      });
+
+      expect(payload.tools).toHaveLength(1);
+      expect(payload.tools[0].name).toBe("get_weather");
+      expect(payload.tools[0].description).toBe("Fetches current weather for a given city");
+      expect(payload.tools[0].strict).toBe(true);
+      const parsedSchema = JSON.parse(payload.tools[0].jsonSchemaString);
+      expect(parsedSchema.properties.city.type).toBe("string");
+    });
+  });
+
+  describe("DEV-03: Model assignment error semantics & cascade binding", () => {
+    it("router model: AssignModel HTTP 500 results in bounded terminal failure with 0 chat calls", async () => {
+      const calls = [];
+      proxyFetchSpy.mockImplementation(async (url, options) => {
+        calls.push({ url, options });
+        if (url.includes(DEVIN_AUTH_PATH)) {
+          return new Response(
+            toBinary(GetUserJwtResponseSchema, { userJwt: "jwt_assign_fail" }),
+            { status: 200, headers: { "content-type": "application/proto" } }
+          );
+        }
+        if (url.includes(DEVIN_ASSIGN_MODEL_PATH)) {
+          return new Response("Internal server error", { status: 500 });
+        }
+        return new Response("Unexpected", { status: 404 });
+      });
+
+      await expect(
+        executor.execute({
+          model: "dv/adaptive",
+          body: { messages: [{ role: "user", content: "hi" }] },
+          credentials: { apiKey: "tok" },
+        })
+      ).rejects.toThrow(/Devin AssignModel failed \(500\)/);
+
+      // Assert no GetChatMessage call was dispatched
+      const chatCalls = calls.filter((c) => c.url.includes(DEVIN_CHAT_PATH));
+      expect(chatCalls).toHaveLength(0);
+    });
+
+    it("router model: AssignModel returning empty assignment JWT results in bounded failure with 0 chat calls", async () => {
+      const calls = [];
+      proxyFetchSpy.mockImplementation(async (url, options) => {
+        calls.push({ url, options });
+        if (url.includes(DEVIN_AUTH_PATH)) {
+          return new Response(
+            toBinary(GetUserJwtResponseSchema, { userJwt: "jwt_auth_ok" }),
+            { status: 200, headers: { "content-type": "application/proto" } }
+          );
+        }
+        if (url.includes(DEVIN_ASSIGN_MODEL_PATH)) {
+          return new Response(
+            toBinary(AssignModelResponseSchema, {
+              assignment: {
+                assignmentJwt: "", // Empty assignmentJwt
+                modelUid: "swe-1-6",
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/proto" } }
+          );
+        }
+        return new Response("Unexpected", { status: 404 });
+      });
+
+      await expect(
+        executor.execute({
+          model: "dv/adaptive",
+          body: { messages: [{ role: "user", content: "hi" }] },
+          credentials: { apiKey: "tok" },
+        })
+      ).rejects.toThrow(/Devin AssignModel error: response carried no assignment JWT and model uid/);
+
+      const chatCalls = calls.filter((c) => c.url.includes(DEVIN_CHAT_PATH));
+      expect(chatCalls).toHaveLength(0);
+    });
+
+    it("direct model: bypasses AssignModel completely and binds cascadeId directly", async () => {
+      const calls = [];
+      proxyFetchSpy.mockImplementation(async (url, options) => {
+        calls.push({ url, options });
+        if (url.includes(DEVIN_AUTH_PATH)) {
+          return new Response(
+            toBinary(GetUserJwtResponseSchema, { userJwt: "jwt_direct_ok" }),
+            { status: 200, headers: { "content-type": "application/proto" } }
+          );
+        }
+        if (url.includes(DEVIN_CHAT_PATH)) {
+          const frame = buildConnectFrame(
+            toBinary(GetChatMessageResponseSchema, { deltaText: "Direct output" }),
+            false
+          );
+          return new Response(createMockStream([frame]), {
+            status: 200,
+            headers: { "content-type": "application/connect+proto" },
+          });
+        }
+        return new Response("Unexpected", { status: 404 });
+      });
+
+      const result = await executor.execute({
+        model: "swe-1-7",
+        body: { messages: [{ role: "user", content: "direct request" }] },
+        credentials: { apiKey: "tok" },
+      });
+
+      const events = await readSseResponse(result.response);
+      expect(events).toContain("[DONE]");
+
+      const assignCalls = calls.filter((c) => c.url.includes(DEVIN_ASSIGN_MODEL_PATH));
+      expect(assignCalls).toHaveLength(0);
+      expect(calls).toHaveLength(2);
+    });
+  });
+
+  describe("DEV-04: Streaming frame handling, Connect errors, and usage aggregation", () => {
+    it("maps Connect gRPC error code resource_exhausted to SSE error without [DONE]", async () => {
+      proxyFetchSpy.mockImplementation(async (url) => {
+        if (url.includes(DEVIN_AUTH_PATH)) {
+          return new Response(
+            toBinary(GetUserJwtResponseSchema, { userJwt: "jwt_quota_err" }),
+            { status: 200, headers: { "content-type": "application/proto" } }
+          );
+        }
+        if (url.includes(DEVIN_CHAT_PATH)) {
+          const trailerPayload = Buffer.from(
+            JSON.stringify({
+              error: {
+                code: "resource_exhausted",
+                message: "Monthly quota exceeded for user",
+              },
+            })
+          );
+          const trailerFrame = new Uint8Array(5 + trailerPayload.length);
+          trailerFrame[0] = 0x02; // End-stream flag
+          new DataView(trailerFrame.buffer).setUint32(1, trailerPayload.length, false);
+          trailerFrame.set(trailerPayload, 5);
+
+          return new Response(createMockStream([trailerFrame]), {
+            status: 200,
+            headers: { "content-type": "application/connect+proto" },
+          });
+        }
+        return new Response("Not found", { status: 404 });
+      });
+
+      const result = await executor.execute({
+        model: "swe-1-7",
+        body: { messages: [{ role: "user", content: "hi" }] },
+        credentials: { apiKey: "tok" },
+      });
+
+      const events = await readSseResponse(result.response);
+      expect(events).toHaveLength(1);
+      const parsed = JSON.parse(events[0]);
+      expect(parsed.error.message).toContain("resource_exhausted");
+      expect(parsed.error.message).toContain("Monthly quota exceeded for user");
+      expect(parsed.error.type).toBe("upstream_error");
+      expect(events).not.toContain("[DONE]");
+    });
+
+    it("delivers text chunks first then error event when error trailer follows text frame", async () => {
+      proxyFetchSpy.mockImplementation(async (url) => {
+        if (url.includes(DEVIN_AUTH_PATH)) {
+          return new Response(
+            toBinary(GetUserJwtResponseSchema, { userJwt: "jwt_partial_stream" }),
+            { status: 200, headers: { "content-type": "application/proto" } }
+          );
+        }
+        if (url.includes(DEVIN_CHAT_PATH)) {
+          const f1 = buildConnectFrame(
+            toBinary(GetChatMessageResponseSchema, { deltaText: "Partial response before failure" }),
+            false
+          );
+          const trailerPayload = Buffer.from(
+            JSON.stringify({
+              error: {
+                code: "unavailable",
+                message: "Backend stream dropped",
+              },
+            })
+          );
+          const trailerFrame = new Uint8Array(5 + trailerPayload.length);
+          trailerFrame[0] = 0x02;
+          new DataView(trailerFrame.buffer).setUint32(1, trailerPayload.length, false);
+          trailerFrame.set(trailerPayload, 5);
+
+          return new Response(createMockStream([Buffer.concat([f1, trailerFrame])]), {
+            status: 200,
+            headers: { "content-type": "application/connect+proto" },
+          });
+        }
+        return new Response("Not found", { status: 404 });
+      });
+
+      const result = await executor.execute({
+        model: "swe-1-7",
+        body: { messages: [{ role: "user", content: "hi" }] },
+        credentials: { apiKey: "tok" },
+      });
+
+      const events = await readSseResponse(result.response);
+      expect(events.length).toBeGreaterThanOrEqual(2);
+      // First chunk has text
+      const firstChunk = JSON.parse(events[0]);
+      expect(firstChunk.choices[0].delta.content).toBe("Partial response before failure");
+      // Last chunk has error
+      const lastChunk = JSON.parse(events[events.length - 1]);
+      expect(lastChunk.error.message).toContain("Backend stream dropped");
+      expect(events).not.toContain("[DONE]");
+    });
+
+    it("aggregates usage and emits valid final usage chunk", async () => {
+      proxyFetchSpy.mockImplementation(async (url) => {
+        if (url.includes(DEVIN_AUTH_PATH)) {
+          return new Response(
+            toBinary(GetUserJwtResponseSchema, { userJwt: "jwt_usage_stream" }),
+            { status: 200, headers: { "content-type": "application/proto" } }
+          );
+        }
+        if (url.includes(DEVIN_CHAT_PATH)) {
+          const f1 = buildConnectFrame(
+            toBinary(GetChatMessageResponseSchema, {
+              deltaText: "Answer completed.",
+              usage: {
+                inputTokens: 1200n,
+                outputTokens: 350n,
+                cacheReadTokens: 400n,
+                cacheWriteTokens: 100n,
+              },
+              stopReason: StopReason.END_TURN,
+            }),
+            false
+          );
+          return new Response(createMockStream([f1]), {
+            status: 200,
+            headers: { "content-type": "application/connect+proto" },
+          });
+        }
+        return new Response("Not found", { status: 404 });
+      });
+
+      const result = await executor.execute({
+        model: "swe-1-7",
+        body: { messages: [{ role: "user", content: "hi" }] },
+        credentials: { apiKey: "tok" },
+      });
+
+      const events = await readSseResponse(result.response);
+      expect(events).toContain("[DONE]");
+      const parsedChunks = events
+        .filter((e) => e !== "[DONE]")
+        .map((e) => JSON.parse(e));
+
+      const usageChunk = parsedChunks.find((c) => c.usage);
+      expect(usageChunk).toBeDefined();
+      expect(usageChunk.usage.prompt_tokens).toBe(1600);
+      expect(usageChunk.usage.completion_tokens).toBe(350);
+      expect(usageChunk.usage.total_tokens).toBe(1950);
+      expect(usageChunk.usage.prompt_tokens_details.cached_tokens).toBe(400);
+    });
+  });
+});
+

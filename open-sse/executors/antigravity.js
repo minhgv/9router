@@ -4,11 +4,12 @@ import { PROVIDERS } from "../config/providers.js";
 import { OAUTH_ENDPOINTS, ANTIGRAVITY_HEADERS, AG_DEFAULT_TOOLS, AG_TOOL_SUFFIX, ANTIGRAVITY_PROMPT_REWRITES } from "../config/appConstants.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { resolveSessionId, toNumericSessionId } from "../utils/sessionManager.js";
-import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { proxyAwareFetch, deriveConnectionProxyOptions } from "../utils/proxyFetch.js";
 import { cleanJSONSchemaForAntigravity, normalizeGeminiContents } from "../translator/formats/gemini.js";
 import { DEFAULT_THINKING_AG_SIGNATURE } from "../config/defaultThinkingSignature.js";
 import { getGeminiThoughtSignatureSync } from "../services/thoughtSignatureStore.js";
 import { ensureAntigravityVersion, getAntigravityIdeUserAgent } from "../utils/antigravityVersion.js";
+
 
 // Sanitize function name: Gemini requires [a-zA-Z_][a-zA-Z0-9_.:\-]{0,63}
 function sanitizeFunctionName(name) {
@@ -412,7 +413,7 @@ export class AntigravityExecutor extends BaseExecutor {
           client_id: this.config.clientId,
           client_secret: this.config.clientSecret
         })
-      }, proxyOptions);
+      }, proxyOptions ?? deriveConnectionProxyOptions(credentials));
 
       if (!response.ok) return null;
 

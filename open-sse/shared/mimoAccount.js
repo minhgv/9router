@@ -179,10 +179,24 @@ async function acquireServiceCookie(passJar, proxyOptions) {
  * @param {object|null} providerSpecificData - may carry `mimoPassToken` override
  */
 async function getServiceCookie(providerSpecificData, proxyOptions) {
-  const passJar = providerSpecificData?.mimoPassToken
-    ? { passToken: providerSpecificData.mimoPassToken, userId: providerSpecificData.mimoUserId, cUserId: providerSpecificData.mimoCUserId }
-    : await readDesktopAccountCookies();
-  if (!passJar) return { cookie: null, reason: "no-pass-token" };
+  let passJar = null;
+  if (providerSpecificData?.mimoPassToken) {
+    const rawToken = String(providerSpecificData.mimoPassToken);
+    if (/[\r\n\x00-\x1f\x7f]/.test(rawToken)) {
+      return { cookie: null, reason: "invalid-pass-token" };
+    }
+    passJar = {
+      passToken: rawToken.trim(),
+      userId: typeof providerSpecificData.mimoUserId === "string" ? providerSpecificData.mimoUserId.replace(/[\r\n\x00-\x1f\x7f]/g, "") : providerSpecificData.mimoUserId,
+      cUserId: typeof providerSpecificData.mimoCUserId === "string" ? providerSpecificData.mimoCUserId.replace(/[\r\n\x00-\x1f\x7f]/g, "") : providerSpecificData.mimoCUserId,
+    };
+  } else {
+    passJar = await readDesktopAccountCookies();
+  }
+  if (!passJar || !passJar.passToken) return { cookie: null, reason: "no-pass-token" };
+  if (/[\r\n\x00-\x1f\x7f]/.test(passJar.passToken)) {
+    return { cookie: null, reason: "invalid-pass-token" };
+  }
 
   // One cached session per passToken — accounts/connections rotate independently.
   const key = crypto.createHash("sha256").update(passJar.passToken).digest("hex");
@@ -202,7 +216,8 @@ async function getServiceCookie(providerSpecificData, proxyOptions) {
 
   const promise = (async () => {
     try {
-      return await acquireServiceCookie(passJar, proxyOptions);
+      const acquireFn = __test__?.acquireServiceCookie || acquireServiceCookie;
+      return await acquireFn(passJar, proxyOptions);
     } catch {
       return null; // network/parse failure — callers degrade, never throw
     } finally {
@@ -218,8 +233,16 @@ async function getServiceCookie(providerSpecificData, proxyOptions) {
 }
 
 /** Drop cached sessions so the next call re-runs the handshake (e.g. after a 401). */
-export function invalidateMimoAccountCookieCache() {
-  _cache.clear();
+export function invalidateMimoAccountCookieCache(providerSpecificData = null) {
+  const passToken = typeof providerSpecificData === "string"
+    ? providerSpecificData
+    : providerSpecificData?.mimoPassToken;
+  if (passToken && typeof passToken === "string") {
+    const key = crypto.createHash("sha256").update(passToken.trim()).digest("hex");
+    _cache.delete(key);
+  } else {
+    _cache.clear();
+  }
 }
 
 /** mimo-server account API base + the User-Agent its backend expects. */
@@ -262,3 +285,16 @@ export async function getMimoAccountUsage(providerSpecificData = null, proxyOpti
     return { error: e.message };
   }
 }
+
+export const __test__ = {
+  _cache,
+  _inflight,
+  acquireServiceCookie,
+  getServiceCookie,
+  COOKIE_TTL_MS,
+  API_BASE,
+  ACCOUNT_HOST,
+  signatureClientSign,
+  absorbSetCookie,
+  cookieHeader,
+};

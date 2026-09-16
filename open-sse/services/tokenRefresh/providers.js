@@ -5,7 +5,7 @@ import { dedupRefresh } from "./dedup.js";
 import { buildExternalIdpRefreshParams } from "../../../src/lib/oauth/kiroExternalIdp.js";
 
 let _xaiServiceSingleton = null;
-export async function refreshXaiToken(refreshToken, log) {
+export async function refreshXaiToken(refreshToken, log, proxyOptions = null) {
   if (!refreshToken) return null;
   return dedupRefresh("xai", refreshToken, async () => {
     try {
@@ -13,7 +13,7 @@ export async function refreshXaiToken(refreshToken, log) {
         const mod = await import("../../../src/lib/oauth/services/xai.js");
         _xaiServiceSingleton = new mod.XaiService();
       }
-      const tokens = await _xaiServiceSingleton.refreshAccessToken(refreshToken);
+      const tokens = await _xaiServiceSingleton.refreshAccessToken(refreshToken, proxyOptions);
       return {
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token || refreshToken,
@@ -82,7 +82,7 @@ function buildRefreshBody(profile, config, refreshToken) {
   return { format: "form", body: new URLSearchParams(payload) };
 }
 
-export async function refreshAccessToken(provider, refreshToken, credentials, log) {
+export async function refreshAccessToken(provider, refreshToken, credentials, log, proxyOptions = null) {
   const config = PROVIDERS[provider];
   const profile = REFRESH_PROFILES[provider] || {};
   const url = resolveRefreshUrl(provider, config, profile);
@@ -107,7 +107,7 @@ export async function refreshAccessToken(provider, refreshToken, credentials, lo
       Accept: "application/json",
       ...(profile.extraHeaders ? (profile.extraHeaders(credentials, config) || {}) : {}),
     };
-    const response = await fetch(url, { method: "POST", headers, body });
+    const response = await proxyAwareFetch(url, { method: "POST", headers, body }, proxyOptions);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -195,8 +195,8 @@ export async function refreshClineToken(refreshToken, log) {
 }
 
 // Claude OAuth: JSON body, client_id only. Delegate to refreshAccessToken("claude", ...).
-export async function refreshClaudeOAuthToken(refreshToken, log) {
-  return refreshAccessToken("claude", refreshToken, {}, log);
+export async function refreshClaudeOAuthToken(refreshToken, log, proxyOptions = null) {
+  return refreshAccessToken("claude", refreshToken, {}, log, proxyOptions);
 }
 
 export async function refreshGoogleToken(refreshToken, clientId, clientSecret, log) {
@@ -254,11 +254,11 @@ export function classifyOAuthRefreshError(errorText = "", status = 0) {
   return { status, code, description, permanent };
 }
 
-export async function refreshCodexToken(refreshToken, log) {
+export async function refreshCodexToken(refreshToken, log, proxyOptions = null) {
   if (!refreshToken) return null;
   return dedupRefresh("codex", refreshToken, async () => {
     try {
-      const response = await fetch(OAUTH_ENDPOINTS.openai.token, {
+      const response = await proxyAwareFetch(OAUTH_ENDPOINTS.openai.token, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -269,7 +269,7 @@ export async function refreshCodexToken(refreshToken, log) {
           grant_type: "refresh_token",
           refresh_token: refreshToken,
         }),
-      });
+      }, proxyOptions);
 
       if (!response.ok) {
         const errorText = await response.text();

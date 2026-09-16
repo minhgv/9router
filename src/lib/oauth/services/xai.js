@@ -5,6 +5,7 @@ import { XAI_CONFIG, XAI_PKCE_VERIFIER_BYTES } from "../constants/xai.js";
 import { startLocalServer } from "../utils/server.js";
 import { generateCodeVerifier, generateCodeChallenge, generateState } from "../utils/pkce.js";
 import { spinner as createSpinner } from "../utils/ui.js";
+import { proxyAwareFetch } from "open-sse/utils/proxyFetch.js";
 
 /**
  * xAI (Grok) OAuth Service
@@ -49,13 +50,13 @@ export function validateOAuthEndpoint(rawUrl, field) {
 /**
  * Discover authorization + token endpoints. Cached process-wide.
  */
-export async function discoverEndpoints() {
+export async function discoverEndpoints(proxyOptions = null) {
   if (cachedDiscovery) return cachedDiscovery;
 
   try {
-    const res = await fetch(XAI_CONFIG.discoveryUrl, {
+    const res = await proxyAwareFetch(XAI_CONFIG.discoveryUrl, {
       headers: { Accept: "application/json" },
-    });
+    }, proxyOptions);
     if (res.ok) {
       const data = await res.json();
       cachedDiscovery = {
@@ -73,6 +74,10 @@ export async function discoverEndpoints() {
     tokenUrl: XAI_CONFIG.tokenUrl,
   };
   return cachedDiscovery;
+}
+
+export function resetDiscoveryCache() {
+  cachedDiscovery = null;
 }
 
 /**
@@ -126,8 +131,8 @@ export class XaiService extends OAuthService {
    * Exchange authorization code for tokens.
    * xAI is a public PKCE client — no client_secret.
    */
-  async exchangeXaiCode({ tokenUrl, code, redirectUri, codeVerifier }) {
-    const res = await fetch(tokenUrl, {
+  async exchangeXaiCode({ tokenUrl, code, redirectUri, codeVerifier }, proxyOptions = null) {
+    const res = await proxyAwareFetch(tokenUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -140,7 +145,7 @@ export class XaiService extends OAuthService {
         redirect_uri: redirectUri,
         code_verifier: codeVerifier,
       }),
-    });
+    }, proxyOptions);
 
     if (!res.ok) {
       const err = await res.text();
@@ -152,9 +157,9 @@ export class XaiService extends OAuthService {
   /**
    * Refresh an access token using a refresh_token.
    */
-  async refreshAccessToken(refreshToken) {
-    const { tokenUrl } = await discoverEndpoints();
-    const res = await fetch(tokenUrl, {
+  async refreshAccessToken(refreshToken, proxyOptions = null) {
+    const { tokenUrl } = await discoverEndpoints(proxyOptions);
+    const res = await proxyAwareFetch(tokenUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -165,7 +170,7 @@ export class XaiService extends OAuthService {
         client_id: XAI_CONFIG.clientId,
         refresh_token: refreshToken,
       }),
-    });
+    }, proxyOptions);
     if (!res.ok) {
       const err = await res.text();
       throw new Error(`xAI token refresh failed: ${err}`);

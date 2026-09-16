@@ -33,6 +33,10 @@ export class XiaomiMimoExecutor extends DefaultExecutor {
     if (XiaomiMimoExecutor.isPreviewModel(model)) {
       return `${MIMO_API_BASE}/api/route/chat/completions`;
     }
+    const rawUrl = credentials?.runtimeTransport?.baseUrl || credentials?.providerSpecificData?.baseUrl;
+    if (rawUrl && typeof rawUrl === "string" && /[\r\n\x00-\x1f\x7f]/.test(rawUrl)) {
+      throw new Error("Invalid baseUrl: contains control characters or CRLF");
+    }
     // Cloud API models keep default handling, so a Claude-format client reaches
     // the /anthropic/v1/messages transport.
     return super.buildUrl(model, stream, urlIndex, credentials);
@@ -40,13 +44,21 @@ export class XiaomiMimoExecutor extends DefaultExecutor {
 
   buildHeaders(credentials, stream = true, url, model) {
     if (XiaomiMimoExecutor.isPreviewModel(model) && credentials?.[COOKIE_KEY]) {
+      const cookie = String(credentials[COOKIE_KEY]);
+      if (/[\r\n\x00-\x1f\x7f]/.test(cookie)) {
+        throw new Error("Invalid MiMo session cookie: contains control characters or CRLF");
+      }
       // Preview models authenticate with the account-session cookie, not the key.
       return {
         "Content-Type": "application/json",
         Accept: stream ? "text/event-stream" : "application/json",
         "User-Agent": MIMO_API_UA,
-        Cookie: credentials[COOKIE_KEY],
+        Cookie: cookie,
       };
+    }
+    const token = credentials?.apiKey || credentials?.accessToken;
+    if (typeof token === "string" && /[\r\n\x00-\x1f\x7f]/.test(token)) {
+      throw new Error("Invalid credential: contains control characters or CRLF");
     }
     return super.buildHeaders(credentials, stream, url, model);
   }
@@ -83,7 +95,7 @@ export class XiaomiMimoExecutor extends DefaultExecutor {
 
     // A cached session can expire early — drop it and retry once with a fresh one.
     if (result.response.status === 401) {
-      invalidateMimoAccountCookieCache();
+      invalidateMimoAccountCookieCache(credentials?.providerSpecificData);
       const fresh = await getMimoAccountCookie(credentials?.providerSpecificData, proxyOptions).catch(() => null);
       if (fresh) {
         credentials[COOKIE_KEY] = fresh;

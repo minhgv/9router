@@ -3,7 +3,7 @@ function normalizeString(value) {
   return String(value).trim();
 }
 
-const ALLOWED_PROXY_SCHEMES = ["http:", "https:", "socks5:", "socks4:", "socks5h:", "socks4a:"];
+const ALLOWED_PROXY_SCHEMES = ["http:", "https:", "socks5:"];
 
 function validateProxyUrl(url) {
   if (!url) return null;
@@ -67,6 +67,17 @@ export function applyOutboundProxyEnv(
       process.env.ALL_PROXY = validated;
       process.env.NINE_ROUTER_PROXY_URL = validated;
       managed = true;
+    } else {
+      // P-PROXY: hostile input is never written raw to env. Redact before
+      // logging (scheme + host only — no path, credentials or control chars).
+      let redacted = "<unparseable proxy url>";
+      try {
+        const parsed = new URL(proxyUrl);
+        redacted = `${parsed.protocol}//${parsed.host}`;
+      } catch {
+        // keep placeholder
+      }
+      console.warn(`[outboundProxy] Rejected unsafe proxy URL for env: ${redacted}`);
     }
   }
 

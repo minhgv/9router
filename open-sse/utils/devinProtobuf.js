@@ -541,7 +541,18 @@ export function parseConnectFrames(buffer, { isStreamEnd = false } = {}) {
 
     let decompressed;
     if (flags & 0x01) {
-      decompressed = zlib.gunzipSync(rawPayload);
+      try {
+        decompressed = zlib.gunzipSync(rawPayload, { maxOutputLength: MAX_DECOMPRESSED_PAYLOAD });
+      } catch (err) {
+        if (
+          err?.code === "ERR_BUFFER_TOO_LARGE" ||
+          err?.message?.includes?.("maxOutputLength") ||
+          err instanceof RangeError
+        ) {
+          throw new Error(`Decompressed frame payload length exceeds 16MiB cap`);
+        }
+        throw err;
+      }
       if (decompressed.length > MAX_DECOMPRESSED_PAYLOAD) {
         throw new Error(`Decompressed frame payload ${decompressed.length} exceeds 16MiB cap`);
       }
@@ -582,7 +593,7 @@ export function decodeDevinUnaryMessage(schema, payload) {
     return fromBinary(schema, buf);
   } catch (directErr) {
     try {
-      const unzipped = zlib.gunzipSync(buf);
+      const unzipped = zlib.gunzipSync(buf, { maxOutputLength: MAX_DECOMPRESSED_PAYLOAD });
       return fromBinary(schema, unzipped);
     } catch {
       throw directErr;
@@ -633,9 +644,24 @@ export function devinDiscoveryMetadata(apiKey, supportedModelDisplays = DEVIN_SU
   };
 }
 
+const PRIVATE_DNS_SUFFIXES = [
+  ".internal",
+  ".local",
+  ".corp",
+  ".home.arpa",
+  ".lan",
+  ".intranet",
+  ".private",
+  ".onion",
+  ".test",
+  ".invalid",
+  ".localdomain",
+];
+
 /**
  * Validates and sanitizes customApiServerUrl returned by GetUserJwtResponse.
- * Override chat base URL ONLY if https, no userinfo, host not IP/localhost — else ignore.
+ * Override chat base URL ONLY if https, no userinfo, host not IP/localhost/private DNS,
+ * explicit non-443 ports rejected — else ignore.
  */
 export function sanitizeCustomApiServerUrl(url) {
   if (!url || typeof url !== "string") return null;
@@ -645,11 +671,13 @@ export function sanitizeCustomApiServerUrl(url) {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== "https:") return null;
     if (parsed.username || parsed.password) return null;
+    if (parsed.port && parsed.port !== "443") return null;
     const hostname = parsed.hostname.toLowerCase();
     if (hostname === "localhost" || hostname.endsWith(".localhost")) return null;
     if (hostname === "127.0.0.1" || hostname === "::1") return null;
     if (/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) return null;
     if (hostname.includes(":") || hostname.startsWith("[") || hostname.endsWith("]")) return null;
+    if (PRIVATE_DNS_SUFFIXES.some((s) => hostname === s.slice(1) || hostname.endsWith(s))) return null;
     return `${parsed.origin}${parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/+$/, "")}`;
   } catch {
     return null;

@@ -2,6 +2,8 @@ import { ProxyAgent, fetch as undiciFetch } from "undici";
 
 const DEFAULT_TEST_URL = "https://google.com/";
 const DEFAULT_TIMEOUT_MS = 8000;
+// P-PROXY allowlist: only http | https | socks5 are valid proxy schemes.
+const ALLOWED_PROXY_PROTOCOLS = new Set(["http:", "https:", "socks5:"]);
 
 function getErrorMessage(err) {
   if (!err) return "Unknown error";
@@ -29,6 +31,28 @@ export async function testProxyUrl({ proxyUrl, testUrl, timeoutMs } = {}) {
   const normalizedProxyUrl = normalizeString(proxyUrl);
   if (!normalizedProxyUrl) {
     return { ok: false, status: 400, error: "proxyUrl is required" };
+  }
+
+  // P-PROXY boundary: reject control characters, unparseable values and
+  // unsupported schemes BEFORE any dispatcher/transport construction.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(normalizedProxyUrl)) {
+    return { ok: false, status: 400, error: "Invalid proxy URL: control characters are not allowed" };
+  }
+
+  let parsedProxyUrl;
+  try {
+    parsedProxyUrl = new URL(normalizedProxyUrl);
+  } catch {
+    return { ok: false, status: 400, error: "Invalid proxy URL" };
+  }
+
+  if (!ALLOWED_PROXY_PROTOCOLS.has(parsedProxyUrl.protocol)) {
+    return {
+      ok: false,
+      status: 400,
+      error: `Unsupported proxy scheme: ${parsedProxyUrl.protocol.replace(/:$/, "")} (allowed: http, https, socks5)`,
+    };
   }
 
   const normalizedTestUrl = normalizeString(testUrl) || DEFAULT_TEST_URL;

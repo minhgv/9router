@@ -338,6 +338,33 @@ export async function POST(request, { params }) {
           );
         }
         const { uid, accessToken, baseUrl } = session.result;
+        const cleanUid = typeof uid === "string" ? uid.replace(/[\r\n\x00-\x1f\x7f]/g, "") : (uid || null);
+        const cleanAccessToken = typeof accessToken === "string" ? accessToken.replace(/[\r\n\x00-\x1f\x7f]/g, "") : accessToken;
+
+        let effectiveBaseUrl = "https://api.xiaomimimo.com/v1";
+        if (baseUrl && typeof baseUrl === "string" && baseUrl.trim()) {
+          const rawUrl = baseUrl.trim();
+          if (!/[\r\n\x00-\x1f\x7f]/.test(rawUrl)) {
+            try {
+              const parsed = new URL(rawUrl);
+              const hostname = parsed.hostname.toLowerCase();
+              const isAllowedHost =
+                (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+                (hostname === "api.xiaomimimo.com" ||
+                  hostname === "platform.xiaomimimo.com" ||
+                  hostname === "mimo-server-cn.xiaomimimo.com" ||
+                  hostname === "xiaomimimo.com" ||
+                  hostname.endsWith(".xiaomimimo.com") ||
+                  hostname === "localhost" ||
+                  hostname === "127.0.0.1");
+              if (isAllowedHost) {
+                effectiveBaseUrl = rawUrl.replace(/\/+$/, "");
+              }
+            } catch {
+              // fallback to default
+            }
+          }
+        }
 
         // Desktop-exclusive Preview models authenticate with the account-session
         // passToken, which only lives in MiMo Desktop's cookie store — attach it
@@ -353,18 +380,18 @@ export async function POST(request, { params }) {
           const connection = await createProviderConnection({
             provider: "xiaomi-mimo",
             authType: "oauth",
-            accessToken,
+            accessToken: cleanAccessToken,
             refreshToken: null,
             expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-            email: uid ? `${uid}@xiaomi` : null,
-            displayName: uid ? `Xiaomi ${uid}` : "Xiaomi MiMo",
+            email: cleanUid ? `${cleanUid}@xiaomi` : null,
+            displayName: cleanUid ? `Xiaomi ${cleanUid}` : "Xiaomi MiMo",
             providerSpecificData: {
-              uid: uid || null,
-              baseUrl: baseUrl || "https://api.xiaomimimo.com/v1",
+              uid: cleanUid || null,
+              baseUrl: effectiveBaseUrl,
               authMethod: "oauth",
-              mimoPassToken: passToken?.passToken || null,
-              mimoUserId: passToken?.userId || null,
-              mimoCUserId: passToken?.cUserId || null,
+              mimoPassToken: passToken?.passToken ? String(passToken.passToken).replace(/[\r\n\x00-\x1f\x7f]/g, "") : null,
+              mimoUserId: passToken?.userId ? String(passToken.userId).replace(/[\r\n\x00-\x1f\x7f]/g, "") : null,
+              mimoCUserId: passToken?.cUserId ? String(passToken.cUserId).replace(/[\r\n\x00-\x1f\x7f]/g, "") : null,
             },
             testStatus: "active",
           });

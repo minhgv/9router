@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("xai/oauth service", () => {
+  let fetchMock;
   beforeEach(() => {
     vi.resetModules();
     vi.restoreAllMocks();
-    vi.stubGlobal("fetch", vi.fn());
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
   });
 
   it("validates discovered endpoints are https x.ai URLs", async () => {
@@ -22,20 +24,19 @@ describe("xai/oauth service", () => {
   });
 
   it("discovers endpoints without custom user-agent headers", async () => {
-    fetch.mockResolvedValueOnce({
+    fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         authorization_endpoint: "https://auth.x.ai/oauth2/authorize",
         token_endpoint: "https://auth.x.ai/oauth2/token",
       }),
     });
-
     const { discoverEndpoints } = await import("../../src/lib/oauth/services/xai.js");
     await expect(discoverEndpoints()).resolves.toEqual({
       authorizeUrl: "https://auth.x.ai/oauth2/authorize",
       tokenUrl: "https://auth.x.ai/oauth2/token",
     });
-    expect(fetch).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenCalledWith(
       "https://auth.x.ai/.well-known/openid-configuration",
       expect.objectContaining({ headers: { Accept: "application/json" } })
     );
@@ -64,14 +65,13 @@ describe("xai/oauth service", () => {
   });
 
   it("generates dashboard auth data with CLIProxyAPI PKCE size and discovered endpoints", async () => {
-    fetch.mockResolvedValueOnce({
+    fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         authorization_endpoint: "https://auth.x.ai/oauth2/authorize-from-discovery",
         token_endpoint: "https://auth.x.ai/oauth2/token-from-discovery",
       }),
     });
-
     const { generateAuthData } = await import("../../src/lib/oauth/providers.js");
     const data = await generateAuthData("xai", "http://127.0.0.1:56121/callback");
     const parsed = new URL(data.authUrl);
@@ -85,7 +85,6 @@ describe("xai/oauth service", () => {
   });
 
   it("exchanges dashboard codes against the discovered xAI token endpoint", async () => {
-    const fetchMock = fetch;
     fetchMock
       .mockResolvedValueOnce({
         ok: true,

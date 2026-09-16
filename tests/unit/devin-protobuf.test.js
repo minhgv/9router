@@ -27,6 +27,35 @@ import {
   GetUserJwtRequestSchema,
   GetUserJwtResponseSchema,
   MetadataSchema,
+  TimestampSchema,
+  ImageDataSchema,
+  ChatToolCallSchema,
+  ChatToolChoiceSchema,
+  ChatToolDefinitionSchema,
+  PromptCacheOptionsSchema,
+  CompletionConfigurationSchema,
+  ModelUsageStatsSchema,
+  ModelAssignmentSchema,
+  ModelFeaturesSchema,
+  ModelInfoSchema,
+  ModelFamilyMetadataSchema,
+  ModelDimensionSchema,
+  ClientModelConfigSchema,
+  GetCliModelConfigsRequestSchema,
+  GetCliModelConfigsResponseSchema,
+  DevinPlanInfoSchema,
+  PlanInfoSchema,
+  PlanStatusSchema,
+  UserStatusSchema,
+  GetUserStatusRequestSchema,
+  GetUserStatusResponseSchema,
+  DEVIN_DEFAULT_BASE_URL,
+  DEVIN_DEFAULT_STOP_PATTERNS,
+  DEVIN_AUTH_PATH,
+  DEVIN_CHAT_PATH,
+  DEVIN_ASSIGN_MODEL_PATH,
+  DEVIN_USER_STATUS_PATH,
+  DEVIN_CLI_MODEL_CONFIGS_PATH,
   DisplayOption,
   DEVIN_SUPPORTED_MODEL_DISPLAYS,
   MAX_CONNECT_FRAME_PAYLOAD,
@@ -499,6 +528,80 @@ describe("devinProtobuf", () => {
       expect(gzipDecoded.userJwt).toBe("jwt_unary_123");
       expect(gzipDecoded.customApiServerUrl).toBe("https://custom.server.com");
     });
+    it("builds and parses 0-byte uncompressed payload frame (flag 0x00)", () => {
+      const framed = buildConnectFrame(Buffer.alloc(0), false);
+      expect(framed.length).toBe(5);
+      expect(framed[0]).toBe(0x00);
+      expect(framed.readUInt32BE(1)).toBe(0);
+
+      const { frames, remaining } = parseConnectFrames(framed, { isStreamEnd: true });
+      expect(frames).toHaveLength(1);
+      expect(frames[0].isCompressed).toBe(false);
+      expect(frames[0].isEndStream).toBe(false);
+      expect(frames[0].payload.length).toBe(0);
+      expect(remaining.length).toBe(0);
+    });
+
+    it("builds and parses 0-byte gzip compressed payload frame (flag 0x01)", () => {
+      const framed = buildConnectFrame(Buffer.alloc(0), true);
+      expect(framed[0]).toBe(0x01);
+      const { frames } = parseConnectFrames(framed, { isStreamEnd: true });
+      expect(frames).toHaveLength(1);
+      expect(frames[0].isCompressed).toBe(true);
+      expect(frames[0].payload.length).toBe(0);
+    });
+
+    it("parses interleaved uncompressed, compressed, and trailer frames in a single chunk", () => {
+      const f1 = buildConnectFrame(Buffer.from("frame-1"), false);
+      const f2 = buildConnectFrame(Buffer.from("frame-2-compressed"), true);
+      const trailerJson = JSON.stringify({ error: { code: "unavailable", message: "server maintenance" } });
+      const f3 = Buffer.alloc(5 + trailerJson.length);
+      f3[0] = 0x02;
+      f3.writeUInt32BE(trailerJson.length, 1);
+      f3.set(Buffer.from(trailerJson), 5);
+
+      const chunk = Buffer.concat([f1, f2, f3]);
+      const { frames, remaining } = parseConnectFrames(chunk, { isStreamEnd: true });
+      expect(frames).toHaveLength(3);
+      expect(frames[0].payload.toString()).toBe("frame-1");
+      expect(frames[0].isCompressed).toBe(false);
+      expect(frames[1].payload.toString()).toBe("frame-2-compressed");
+      expect(frames[1].isCompressed).toBe(true);
+      expect(frames[2].isEndStream).toBe(true);
+      expect(JSON.parse(frames[2].payload.toString())).toEqual({
+        error: { code: "unavailable", message: "server maintenance" },
+      });
+      expect(remaining.length).toBe(0);
+    });
+
+    it("parses frames arriving across fragmented byte chunks splitting header and payload", () => {
+      const frame1 = buildConnectFrame(Buffer.from("first message data"), false);
+      const frame2 = buildConnectFrame(Buffer.from("second message data"), true);
+      const allBytes = Buffer.concat([frame1, frame2]);
+
+      let pending = Buffer.alloc(0);
+      const collected = [];
+      const chunkSize = 3;
+      for (let i = 0; i < allBytes.length; i += chunkSize) {
+        const slice = allBytes.subarray(i, Math.min(i + chunkSize, allBytes.length));
+        pending = Buffer.concat([pending, slice]);
+        const isLast = i + chunkSize >= allBytes.length;
+        const parsed = parseConnectFrames(pending, { isStreamEnd: isLast });
+        collected.push(...parsed.frames);
+        pending = parsed.remaining;
+      }
+
+      expect(collected).toHaveLength(2);
+      expect(collected[0].payload.toString()).toBe("first message data");
+      expect(collected[1].payload.toString()).toBe("second message data");
+      expect(pending.length).toBe(0);
+    });
+
+    it("handles empty buffers cleanly", () => {
+      const { frames, remaining } = parseConnectFrames(Buffer.alloc(0), { isStreamEnd: false });
+      expect(frames).toEqual([]);
+      expect(remaining.length).toBe(0);
+    });
   });
 
   describe("token normalization and metadata builders", () => {
@@ -553,13 +656,15 @@ describe("devinProtobuf", () => {
     });
 
     it("sanitizes customApiServerUrl according to security constraints", () => {
-      // Valid HTTPS URLs
+      // Valid HTTPS URLs (port 443 only)
       expect(sanitizeCustomApiServerUrl("https://server.codeium.com")).toBe("https://server.codeium.com");
-      expect(sanitizeCustomApiServerUrl("https://devin-cluster.internal.net:8443/api/")).toBe("https://devin-cluster.internal.net:8443/api");
+      expect(sanitizeCustomApiServerUrl("https://server.codeium.com/api/")).toBe("https://server.codeium.com/api");
+
+      // Non-443 port rejected per locked P-DEVIN policy
+      expect(sanitizeCustomApiServerUrl("https://devin-cluster.internal.net:8443/api/")).toBeNull();
 
       // Non-HTTPS rejected
       expect(sanitizeCustomApiServerUrl("http://server.codeium.com")).toBeNull();
-
       // Localhost rejected
       expect(sanitizeCustomApiServerUrl("https://localhost:8080")).toBeNull();
       expect(sanitizeCustomApiServerUrl("https://sub.localhost:8080")).toBeNull();
@@ -576,6 +681,202 @@ describe("devinProtobuf", () => {
       expect(sanitizeCustomApiServerUrl("")).toBeNull();
       expect(sanitizeCustomApiServerUrl("not-a-url")).toBeNull();
       expect(sanitizeCustomApiServerUrl(null)).toBeNull();
+    });
+  });
+
+  describe("schema codecs IR and round-trip (DEV-02 residuals)", () => {
+    it("round-trips TimestampSchema", () => {
+      const msg = { seconds: 1717000000n, nanos: 500000 };
+      const bin = toBinary(TimestampSchema, msg);
+      const dec = fromBinary(TimestampSchema, bin);
+      expect(dec.seconds).toBe(1717000000n);
+      expect(dec.nanos).toBe(500000);
+    });
+
+    it("round-trips ImageDataSchema", () => {
+      const msg = { base64Data: "iVBORw0KGgoAAAANSUhEUg==", mimeType: "image/png" };
+      const bin = toBinary(ImageDataSchema, msg);
+      const dec = fromBinary(ImageDataSchema, bin);
+      expect(dec).toEqual(msg);
+    });
+
+    it("round-trips ChatToolCallSchema and ChatToolChoiceSchema", () => {
+      const toolCall = { id: "call_123", name: "fetch_data", argumentsJson: '{"key":"val"}' };
+      const tcBin = toBinary(ChatToolCallSchema, toolCall);
+      const tcDec = fromBinary(ChatToolCallSchema, tcBin);
+      expect(tcDec).toEqual(toolCall);
+
+      const toolChoice = { optionName: "required", toolName: "fetch_data" };
+      const choiceBin = toBinary(ChatToolChoiceSchema, toolChoice);
+      const choiceDec = fromBinary(ChatToolChoiceSchema, choiceBin);
+      expect(choiceDec).toEqual(toolChoice);
+    });
+
+    it("round-trips ChatToolDefinitionSchema with strict flag", () => {
+      const toolDef = {
+        name: "calculator",
+        description: "Evaluates expressions",
+        jsonSchemaString: '{"type":"object"}',
+        strict: true,
+      };
+      const bin = toBinary(ChatToolDefinitionSchema, toolDef);
+      const dec = fromBinary(ChatToolDefinitionSchema, bin);
+      expect(dec).toEqual(toolDef);
+    });
+
+    it("round-trips PromptCacheOptionsSchema", () => {
+      const opts = { type: PromptCacheType.EPHEMERAL };
+      const bin = toBinary(PromptCacheOptionsSchema, opts);
+      const dec = fromBinary(PromptCacheOptionsSchema, bin);
+      expect(dec).toEqual(opts);
+    });
+
+    it("round-trips ModelUsageStatsSchema with tokens and cache breakdown", () => {
+      const usage = {
+        inputTokens: 1050n,
+        outputTokens: 250n,
+        cacheReadTokens: 500n,
+        cacheWriteTokens: 100n,
+      };
+      const bin = toBinary(ModelUsageStatsSchema, usage);
+      const dec = fromBinary(ModelUsageStatsSchema, bin);
+      expect(dec.inputTokens).toBe(1050n);
+      expect(dec.outputTokens).toBe(250n);
+      expect(dec.cacheReadTokens).toBe(500n);
+      expect(dec.cacheWriteTokens).toBe(100n);
+    });
+
+    it("round-trips ModelFeaturesSchema and ModelDimensionSchema", () => {
+      const features = {
+        supportsContextTokens: true,
+        supportsToolCalls: true,
+        supportsImages: true,
+        supportsThinking: true,
+        supportsParallelToolCalls: true,
+      };
+      const bin = toBinary(ModelFeaturesSchema, features);
+      const dec = fromBinary(ModelFeaturesSchema, bin);
+      expect(dec.supportsContextTokens).toBe(true);
+      expect(dec.supportsToolCalls).toBe(true);
+      expect(dec.supportsImages).toBe(true);
+      expect(dec.supportsThinking).toBe(true);
+      expect(dec.supportsParallelToolCalls).toBe(true);
+
+      const dim = { label: "Quality", value: 4.5, denominator: "5", minRange: 1, maxRange: 5, kind: 1 };
+      const dimBin = toBinary(ModelDimensionSchema, dim);
+      const dimDec = fromBinary(ModelDimensionSchema, dimBin);
+      expect(dimDec.label).toBe("Quality");
+      expect(dimDec.value).toBeCloseTo(4.5);
+      expect(dimDec.denominator).toBe("5");
+      expect(dimDec.kind).toBe(1);
+    });
+    it("round-trips ModelInfoSchema with repeated fields", () => {
+      const modelInfo = {
+        modelUid: "swe-2-high",
+        modelName: "SWE-2 High",
+        modelFeatures: { supportsToolCalls: true, supportsThinking: true },
+        maxOutputTokens: 64000,
+        harnessUids: ["harness-1", "harness-2"],
+      };
+      const bin = toBinary(ModelInfoSchema, modelInfo);
+      const dec = fromBinary(ModelInfoSchema, bin);
+      expect(dec.modelUid).toBe("swe-2-high");
+      expect(dec.modelName).toBe("SWE-2 High");
+      expect(dec.modelFeatures.supportsToolCalls).toBe(true);
+      expect(dec.modelFeatures.supportsThinking).toBe(true);
+      expect(dec.maxOutputTokens).toBe(64000);
+      expect(dec.harnessUids).toEqual(["harness-1", "harness-2"]);
+    });
+
+    it("round-trips ClientModelConfigSchema and GetCliModelConfigsResponseSchema", () => {
+      const config = {
+        label: "SWE 1.6",
+        modelUid: "swe-1-6",
+        modelInfo: { modelUid: "swe-1-6", modelName: "SWE-1.6" },
+        isPremium: true,
+        supportsImages: true,
+        isDefaultModelInFamily: true,
+      };
+      const resp = {
+        clientModelConfigs: [config],
+      };
+      const bin = toBinary(GetCliModelConfigsResponseSchema, resp);
+      const dec = fromBinary(GetCliModelConfigsResponseSchema, bin);
+      expect(dec.clientModelConfigs).toHaveLength(1);
+      expect(dec.clientModelConfigs[0].label).toBe("SWE 1.6");
+      expect(dec.clientModelConfigs[0].modelUid).toBe("swe-1-6");
+      expect(dec.clientModelConfigs[0].modelInfo.modelUid).toBe("swe-1-6");
+      expect(dec.clientModelConfigs[0].isPremium).toBe(true);
+      expect(dec.clientModelConfigs[0].supportsImages).toBe(true);
+      expect(dec.clientModelConfigs[0].isDefaultModelInFamily).toBe(true);
+    });
+
+    it("round-trips DevinPlanInfoSchema, PlanInfoSchema, and UserStatusSchema", () => {
+      const userStatus = {
+        name: "Alice",
+        email: "alice@example.com",
+        planStatus: {
+          planInfo: {
+            planName: "Pro Plan",
+            devinInfo: { canUseCascade: true, canUseCli: true, orgId: "org_123" },
+          },
+        },
+      };
+      const bin = toBinary(GetUserStatusResponseSchema, { userStatus });
+      const dec = fromBinary(GetUserStatusResponseSchema, bin);
+      expect(dec.userStatus.name).toBe("Alice");
+      expect(dec.userStatus.email).toBe("alice@example.com");
+      expect(dec.userStatus.planStatus.planInfo.planName).toBe("Pro Plan");
+      expect(dec.userStatus.planStatus.planInfo.devinInfo.canUseCascade).toBe(true);
+      expect(dec.userStatus.planStatus.planInfo.devinInfo.canUseCli).toBe(true);
+      expect(dec.userStatus.planStatus.planInfo.devinInfo.orgId).toBe("org_123");
+    });
+  });
+
+
+  describe("URL sanitization and Connect paths (DEV-01 residuals)", () => {
+    it("validates all standard Devin ConnectRPC path constants", () => {
+      expect(DEVIN_DEFAULT_BASE_URL).toBe("https://server.codeium.com");
+      expect(DEVIN_AUTH_PATH).toBe("/exa.auth_pb.AuthService/GetUserJwt");
+      expect(DEVIN_CHAT_PATH).toBe("/exa.api_server_pb.ApiServerService/GetChatMessage");
+      expect(DEVIN_ASSIGN_MODEL_PATH).toBe("/exa.api_server_pb.ApiServerService/AssignModel");
+      expect(DEVIN_USER_STATUS_PATH).toBe("/exa.seat_management_pb.SeatManagementService/GetUserStatus");
+      expect(DEVIN_CLI_MODEL_CONFIGS_PATH).toBe("/exa.api_server_pb.ApiServerService/GetCliModelConfigs");
+      expect(DEVIN_DEFAULT_STOP_PATTERNS).toEqual([
+        "<|user|>",
+        "<|bot|>",
+        "<|context_request|>",
+        "<|endoftext|>",
+        "<|end_of_turn|>",
+      ]);
+    });
+
+    it("sanitizes customApiServerUrl: preserves path hierarchy while trimming trailing slashes", () => {
+      expect(sanitizeCustomApiServerUrl("https://cascade.enterprise.com/api/v1/")).toBe(
+        "https://cascade.enterprise.com/api/v1"
+      );
+      expect(sanitizeCustomApiServerUrl("https://cascade.enterprise.com/api/v1")).toBe(
+        "https://cascade.enterprise.com/api/v1"
+      );
+      expect(sanitizeCustomApiServerUrl("https://cascade.enterprise.com/")).toBe(
+        "https://cascade.enterprise.com"
+      );
+    });
+
+    it("sanitizes customApiServerUrl: normalizes default port 443 away", () => {
+      expect(sanitizeCustomApiServerUrl("https://cascade.enterprise.com:443/chat")).toBe(
+        "https://cascade.enterprise.com/chat"
+      );
+      expect(sanitizeCustomApiServerUrl("https://cascade.enterprise.com:443")).toBe(
+        "https://cascade.enterprise.com"
+      );
+    });
+
+    it("sanitizes customApiServerUrl: rejects non-string inputs cleanly", () => {
+      expect(sanitizeCustomApiServerUrl(12345)).toBeNull();
+      expect(sanitizeCustomApiServerUrl({})).toBeNull();
+      expect(sanitizeCustomApiServerUrl([])).toBeNull();
+      expect(sanitizeCustomApiServerUrl(undefined)).toBeNull();
     });
   });
 });

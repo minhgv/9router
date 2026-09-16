@@ -162,6 +162,6 @@ export class MimoFreeExecutor extends BaseExecutor {
 export const __test__ = {
   generateFingerprint, generateSessionId, bootstrapJwt, resetJwtCache, parseJwtExp,
   injectSystemMarker, MIMO_SYSTEM_MARKER, BOOTSTRAP_URL, CHAT_URL, SESSION_AFFINITY_PREFIX,
+  USER_AGENTS,
 };
-
 export default MimoFreeExecutor;

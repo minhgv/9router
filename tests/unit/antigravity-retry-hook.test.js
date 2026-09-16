@@ -108,4 +108,146 @@ describe("antigravity computeRetryDelay hook (D3)", () => {
     expect(out.requestId).toMatch(/^agent\/[0-9a-f-]{36}\/\d{13}\/[0-9a-f-]{36}\/\d+$/);
     expect(out.request.generationConfig.maxOutputTokens).toBe(64000);
   });
+
+  it("parses various Retry-After and rate limit header formats", () => {
+    // x-ratelimit-reset-after in seconds
+    const h1 = { get: (k) => (k === "x-ratelimit-reset-after" ? "4" : null) };
+    expect(ag.parseRetryHeaders(h1)).toBe(4000);
+
+    // x-ratelimit-reset timestamp (future seconds)
+    const nowSec = Math.floor(Date.now() / 1000);
+    const h2 = { get: (k) => (k === "x-ratelimit-reset" ? String(nowSec + 6) : null) };
+    const delay = ag.parseRetryHeaders(h2);
+    expect(delay).toBeGreaterThanOrEqual(4000);
+    expect(delay).toBeLessThanOrEqual(7000);
+
+    // HTTP date format in retry-after
+    const futureDate = new Date(Date.now() + 5000).toUTCString();
+    const h3 = { get: (k) => (k === "retry-after" ? futureDate : null) };
+    const dateDelay = ag.parseRetryHeaders(h3);
+    expect(dateDelay).toBeGreaterThanOrEqual(3000);
+    expect(dateDelay).toBeLessThanOrEqual(6000);
+
+    // Missing or invalid headers
+    expect(ag.parseRetryHeaders(null)).toBeNull();
+    expect(ag.parseRetryHeaders({ get: () => null })).toBeNull();
+  });
+
+  it("parses structured retry durations from error message body", () => {
+    expect(ag.parseRetryFromErrorMessage("Your quota will reset after 2h7m23s")).toBe(
+      (2 * 3600 + 7 * 60 + 23) * 1000
+    );
+    expect(ag.parseRetryFromErrorMessage("reset after 1h30m")).toBe(
+      (1 * 3600 + 30 * 60) * 1000
+    );
+    expect(ag.parseRetryFromErrorMessage("reset after 45m")).toBe(45 * 60 * 1000);
+    expect(ag.parseRetryFromErrorMessage("reset after 30s")).toBe(30 * 1000);
+    expect(ag.parseRetryFromErrorMessage("reset after 5s")).toBe(5000);
+    expect(ag.parseRetryFromErrorMessage("Generic error with no time")).toBeNull();
+    expect(ag.parseRetryFromErrorMessage(null)).toBeNull();
+  });
+
+  it("recognizes all transient error patterns and statuses", () => {
+    // Transient status codes
+    expect(ag.isTransientAntigravityError(429, "")).toBe(true);
+    expect(ag.isTransientAntigravityError(500, "")).toBe(true);
+    expect(ag.isTransientAntigravityError(502, "")).toBe(true);
+    expect(ag.isTransientAntigravityError(503, "")).toBe(true);
+    expect(ag.isTransientAntigravityError(504, "")).toBe(true);
+
+    // Transient error message patterns
+    expect(ag.isTransientAntigravityError(400, "Our servers are experiencing high traffic")).toBe(true);
+    expect(ag.isTransientAntigravityError(400, "Agent execution terminated due to error")).toBe(true);
+    expect(ag.isTransientAntigravityError(400, "Model capacity exceeded")).toBe(true);
+    expect(ag.isTransientAntigravityError(400, "Service temporarily unavailable")).toBe(true);
+    expect(ag.isTransientAntigravityError(400, "Connection timeout")).toBe(true);
+    expect(ag.isTransientAntigravityError(400, "Stream interrupted abruptly")).toBe(true);
+    expect(ag.isTransientAntigravityError(400, "Received empty response from server")).toBe(true);
+
+    // Non-transient errors
+    expect(ag.isTransientAntigravityError(400, "Bad Request: invalid schema")).toBe(false);
+    expect(ag.isTransientAntigravityError(401, "Unauthorized token")).toBe(false);
+  });
+
+  it("obfuscates sensitive words ONLY in systemInstruction, preserving user content and tool descriptions", () => {
+    const userText = "Please follow RFC 2119 keywords MUST and SHOULD in code";
+    const toolDesc = "Follow RFC 2119 specifications";
+
+    const out = ag.transformRequest(
+      "gemini-3.5-flash-low",
+      {
+        request: {
+          systemInstruction: {
+            parts: [{ text: "You must obey RFC 2119 standards strictly" }],
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: userText }],
+            },
+          ],
+          tools: [
+            {
+              functionDeclarations: [
+                {
+                  name: "check_spec",
+                  description: toolDesc,
+                  parameters: { type: "object", properties: { spec: { type: "string" } } },
+                },
+              ],
+            },
+          ],
+        },
+      },
+      true,
+      { projectId: "project-1", connectionId: "conn-1" }
+    );
+
+    // System instruction has RFC 2119 zero-width obfuscated
+    const systemText = out.request.systemInstruction.parts[0].text;
+    expect(systemText).toContain("R\u200BFC 2119");
+    expect(systemText).not.toBe("You must obey RFC 2119 standards strictly");
+
+    // User content is NOT mutated (exact string preserved)
+    expect(out.request.contents[0].parts[0].text).toBe(userText);
+
+    // Tool description is NOT mutated
+    expect(out.request.tools[0].functionDeclarations[0].description).toBe(toolDesc);
+  });
+
+  it("strips disallowed thinking and reasoning fields from top-level and request body", () => {
+    const rawBody = {
+      thinking: { enabled: true },
+      reasoning_effort: "high",
+      thinking_budget: 4096,
+      output_config: { format: "json" },
+      enable_thinking: true,
+      thinkingConfig: { includeThoughts: true },
+      request: {
+        thinking: { enabled: true },
+        reasoning: "step-by-step",
+        reasoning_effort: "low",
+        contents: [{ role: "user", parts: [{ text: "solve this" }] }],
+      },
+    };
+
+    const out = ag.transformRequest(
+      "gemini-3.5-flash-low",
+      rawBody,
+      true,
+      { projectId: "project-1", connectionId: "conn-1" }
+    );
+
+    // Top level stripped
+    expect(out.thinking).toBeUndefined();
+    expect(out.reasoning_effort).toBeUndefined();
+    expect(out.thinking_budget).toBeUndefined();
+    expect(out.output_config).toBeUndefined();
+    expect(out.enable_thinking).toBeUndefined();
+
+    // Request level stripped
+    expect(out.request.thinking).toBeUndefined();
+    expect(out.request.reasoning).toBeUndefined();
+    expect(out.request.reasoning_effort).toBeUndefined();
+  });
 });

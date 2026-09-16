@@ -234,9 +234,9 @@ export class CodexExecutor extends BaseExecutor {
     return this._isCompact ? `${base}/compact` : base;
   }
 
-  async refreshCredentials(credentials, log) {
+  async refreshCredentials(credentials, log, proxyOptions = null) {
     if (!credentials?.refreshToken) return null;
-    return refreshProviderCredentials("codex", credentials, log);
+    return refreshProviderCredentials("codex", credentials, log, proxyOptions);
   }
 
   needsRefresh(credentials) {
@@ -253,20 +253,25 @@ export class CodexExecutor extends BaseExecutor {
     for (const item of body.input) {
       if (!Array.isArray(item.content)) continue;
       const pending = item.content.map(async (c) => {
-        if (c.type !== "image_url") return c;
-        const url = typeof c.image_url === "string" ? c.image_url : c.image_url?.url;
-        const detail = c.image_url?.detail || "auto";
-        if (!url) return c;
+        if (!c || (c.type !== "image_url" && c.type !== "input_image")) return c;
+        const url = typeof c.image_url === "string" ? c.image_url : (c.image_url?.url || c.url);
+        const detail = (typeof c.image_url === "object" && c.image_url?.detail) ? c.image_url.detail : (c.detail || "auto");
+        if (!url || typeof url !== "string") return null;
         if (url.startsWith("data:")) return { type: "input_image", image_url: url, detail };
         const fetched = await fetchImageAsBase64(url, { timeoutMs: 15000 });
-        return { type: "input_image", image_url: fetched?.url || url, detail };
+        if (fetched?.url) {
+          return { type: "input_image", image_url: fetched.url, detail };
+        }
+        // Policy P-CX-IMG: Drop image block on failure; NEVER fallback to remote URL
+        return null;
       });
-      item.content = await Promise.all(pending);
+      const resolved = await Promise.all(pending);
+      item.content = resolved.filter(Boolean);
     }
   }
 
   async execute(args) {
-    const imgCount = Array.isArray(args.body?.input) ? args.body.input.reduce((n, it) => n + (Array.isArray(it.content) ? it.content.filter(c => c.type === "image_url").length : 0), 0) : 0;
+    const imgCount = Array.isArray(args.body?.input) ? args.body.input.reduce((n, it) => n + (Array.isArray(it.content) ? it.content.filter(c => c && (c.type === "image_url" || c.type === "input_image")).length : 0), 0) : 0;
     const inputLen = Array.isArray(args.body?.input) ? args.body.input.length : 0;
     dbg("CODEX", `execute start | inputItems=${inputLen} | images=${imgCount} | sessionId=${this._currentSessionId || "pending"}`);
     if (imgCount > 0) {

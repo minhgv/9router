@@ -26,9 +26,53 @@ export async function POST(request) {
         { status: 400 },
       );
     }
+    if (/[\r\n\x00-\x1f\x7f]/.test(key)) {
+      return NextResponse.json(
+        { error: "API key contains invalid control characters or CRLF" },
+        { status: 400 },
+      );
+    }
 
-    const effectiveBaseUrl = (baseUrl || "https://api.xiaomimimo.com/v1").replace(/\/+$/, "");
-
+    let effectiveBaseUrl = "https://api.xiaomimimo.com/v1";
+    if (baseUrl && typeof baseUrl === "string" && baseUrl.trim()) {
+      const rawUrl = baseUrl.trim();
+      if (/[\r\n\x00-\x1f\x7f]/.test(rawUrl)) {
+        return NextResponse.json(
+          { error: "baseUrl contains invalid control characters or CRLF" },
+          { status: 400 },
+        );
+      }
+      try {
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+          return NextResponse.json(
+            { error: "Invalid baseUrl protocol — expected http or https" },
+            { status: 400 },
+          );
+        }
+        const hostname = parsed.hostname.toLowerCase();
+        const isAllowedHost =
+          hostname === "api.xiaomimimo.com" ||
+          hostname === "platform.xiaomimimo.com" ||
+          hostname === "mimo-server-cn.xiaomimimo.com" ||
+          hostname === "xiaomimimo.com" ||
+          hostname.endsWith(".xiaomimimo.com") ||
+          hostname === "localhost" ||
+          hostname === "127.0.0.1";
+        if (!isAllowedHost) {
+          return NextResponse.json(
+            { error: "Unsupported baseUrl host: arbitrary host override is not permitted" },
+            { status: 400 },
+          );
+        }
+        effectiveBaseUrl = rawUrl.replace(/\/+$/, "");
+      } catch {
+        return NextResponse.json(
+          { error: "Invalid baseUrl format" },
+          { status: 400 },
+        );
+      }
+    }
     // Validate the key against the models endpoint
     let validated = false;
     let modelCount = 0;

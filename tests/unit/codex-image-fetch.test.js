@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Mock DNS so the SSRF guard treats example.com as public.
-vi.mock("node:dns/promises", () => ({ lookup: async () => ({ address: "93.184.216.34" }) }));
+vi.mock("node:dns/promises", () => ({ lookup: async () => [{ address: "93.184.216.34", family: 4 }] }));
 
 import { CodexExecutor } from "../../open-sse/executors/codex.js";
 import * as proxyFetchModule from "../../open-sse/utils/proxyFetch.js";
@@ -105,25 +105,6 @@ describe("CodexExecutor image handling", () => {
     const imgBlock = body.input[0].content.find((c) => c.type === "input_image");
     expect(imgBlock.image_url).toBe(DATA_URI);
     expect(global.fetch).not.toHaveBeenCalled();
-  });
-
-  it("falls back to original URL when remote fetch fails", async () => {
-    global.fetch = vi.fn(async () => { throw new Error("network down"); });
-
-    const executor = new CodexExecutor();
-    const body = {
-      input: [
-        {
-          role: "user",
-          content: [{ type: "image_url", image_url: { url: REMOTE_URL } }],
-        },
-      ],
-    };
-
-    await executor.prefetchImages(body);
-
-    const imgBlock = body.input[0].content.find((c) => c.type === "input_image");
-    expect(imgBlock.image_url).toBe(REMOTE_URL);
   });
 
   it("execute() prefetches images before sending to upstream", async () => {

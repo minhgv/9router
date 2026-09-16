@@ -4,6 +4,7 @@ import {
   refreshTokenByProvider,
 } from "./tokenRefresh.js";
 import { PROVIDER_OAUTH } from "../providers/index.js";
+import { deriveConnectionProxyOptions } from "../utils/proxyFetch.js";
 
 // Single source: codex.oauth.maxRefreshAgeMs (8 days) — proactive refresh window
 export const CODEX_MAX_REFRESH_AGE_MS = PROVIDER_OAUTH["codex"]?.maxRefreshAgeMs;
@@ -146,11 +147,12 @@ export async function withCredentialRefreshLock(provider, credentials, refreshFn
   return pending;
 }
 
-export async function refreshProviderCredentials(provider, credentials, log) {
+export async function refreshProviderCredentials(provider, credentials, log, proxyOptions = null) {
   if (!credentials) return null;
 
+  const resolvedProxyOptions = proxyOptions ?? deriveConnectionProxyOptions(credentials);
   return withCredentialRefreshLock(provider, credentials, async () => {
-    const refreshed = await refreshTokenByProvider(provider, credentials, log);
+    const refreshed = await refreshTokenByProvider(provider, credentials, log, resolvedProxyOptions);
     return mergeRefreshedCredentials(provider, credentials, refreshed);
   });
 }

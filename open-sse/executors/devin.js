@@ -160,7 +160,7 @@ export class DevinExecutor extends BaseExecutor {
 
           const upstream = await proxyAwareFetch(
             chatUrl,
-            { method: "POST", headers: chatHeaders, body: framedBody, signal },
+            { method: "POST", headers: chatHeaders, body: framedBody, signal, redirect: "error" },
             proxyOptions
           );
 
@@ -212,6 +212,7 @@ export class DevinExecutor extends BaseExecutor {
               proxyAwareFetch(chatUrl, {
                 method: "POST", headers: chatHeaders, body: hedgePayloads[i].frame,
                 signal: controller.signal,
+                redirect: "error",
               }, proxyOptions).catch(() => null)
             )
           );
@@ -291,6 +292,7 @@ export class DevinExecutor extends BaseExecutor {
         },
         body: authReqBinary,
         signal,
+        redirect: "error",
       },
       proxyOptions
     );
@@ -452,6 +454,7 @@ export class DevinExecutor extends BaseExecutor {
         },
         body: toBinary(AssignModelRequestSchema, request),
         signal,
+        redirect: "error",
       },
       proxyOptions
     );
@@ -902,7 +905,6 @@ export class DevinExecutor extends BaseExecutor {
               controller.error(err);
             } else {
               emit(`data: ${JSON.stringify({ error: { message: err?.message || "Devin stream error", type: "upstream_error" } })}\n\n`);
-              emit(SSE_DONE);
               controller.close();
             }
           } catch {}

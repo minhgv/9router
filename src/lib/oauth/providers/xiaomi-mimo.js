@@ -83,10 +83,38 @@ export function decryptCallback(privateKeyDer, encryptedB64) {
     throw new Error("Decrypted payload is not a valid object");
   }
 
+  let effectiveUrl = XIAOMI_MIMO_CONFIG.defaultBaseUrl;
+  if (parsed.url && typeof parsed.url === "string") {
+    const raw = parsed.url.trim();
+    if (!/[\r\n\x00-\x1f\x7f]/.test(raw)) {
+      try {
+        const u = new URL(raw);
+        const hostname = u.hostname.toLowerCase();
+        const isAllowedHost =
+          (u.protocol === "https:" || u.protocol === "http:") &&
+          (hostname === "api.xiaomimimo.com" ||
+            hostname === "platform.xiaomimimo.com" ||
+            hostname === "mimo-server-cn.xiaomimimo.com" ||
+            hostname === "xiaomimimo.com" ||
+            hostname.endsWith(".xiaomimimo.com") ||
+            hostname === "localhost" ||
+            hostname === "127.0.0.1");
+        if (isAllowedHost) {
+          effectiveUrl = raw;
+        }
+      } catch {
+        // fallback to default
+      }
+    }
+  }
+
+  const uid = typeof parsed.uid === "string" ? parsed.uid.replace(/[\r\n\x00-\x1f\x7f]/g, "") : (parsed.uid || null);
+  const sk = typeof parsed.sk === "string" ? parsed.sk.replace(/[\r\n\x00-\x1f\x7f]/g, "") : (parsed.sk || null);
+
   return {
-    uid: parsed.uid || null,
-    sk: parsed.sk || null,
-    url: parsed.url || XIAOMI_MIMO_CONFIG.defaultBaseUrl,
+    uid: uid || null,
+    sk: sk || null,
+    url: effectiveUrl,
   };
 }
 

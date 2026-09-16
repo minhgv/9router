@@ -2,18 +2,26 @@
 // envelope (project, model, requestType, sessionId) and auth headers.
 import { nowSec, sizeToAspectRatio } from "./_base.js";
 import { getExecutor } from "../../executors/index.js";
+import { deriveConnectionProxyOptions } from "../../utils/proxyFetch.js";
+
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
 // Convert image input (data URI or raw base64) to Gemini inlineData part
 function resolveImageInput(input) {
   if (!input || typeof input !== "string") return null;
   // data:image/png;base64,... format
-  const dataUriMatch = input.match(/^data:(image\/[^;]+);base64,(.+)$/);
+  const dataUriMatch = input.match(/^data:(image\/[^;]+);base64,([A-Za-z0-9+/=\r\n]+)$/);
   if (dataUriMatch) {
-    return { inlineData: { mimeType: dataUriMatch[1], data: dataUriMatch[2] } };
+    const rawData = dataUriMatch[2].replace(/[\r\n\s]/g, "");
+    if (rawData.length > 0 && BASE64_RE.test(rawData)) {
+      return { inlineData: { mimeType: dataUriMatch[1], data: rawData } };
+    }
+    return null;
   }
   // Raw base64 string (assume PNG)
-  if (/^[A-Za-z0-9+/]/.test(input) && input.length > 100 && !input.startsWith("http")) {
-    return { inlineData: { mimeType: "image/png", data: input } };
+  const cleanInput = input.replace(/[\r\n\s]/g, "");
+  if (cleanInput.length > 100 && !input.startsWith("http") && !input.startsWith("file:") && !input.startsWith("ftp:") && BASE64_RE.test(cleanInput)) {
+    return { inlineData: { mimeType: "image/png", data: cleanInput } };
   }
   return null;
 }
@@ -27,7 +35,7 @@ export default {
   buildHeaders: () => ({}),
   buildBody: () => ({}),
 
-  async executeViaExecutor(model, body, credentials, log) {
+  async executeViaExecutor(model, body, credentials, log, proxyOptions = null) {
     const executor = getExecutor("antigravity");
     if (!executor) throw new Error("Antigravity executor not found");
 
@@ -62,6 +70,7 @@ export default {
       stream: false,
       credentials,
       log,
+      proxyOptions: proxyOptions ?? deriveConnectionProxyOptions(credentials),
     });
 
     if (!result.response.ok) {

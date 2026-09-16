@@ -24,12 +24,26 @@ import { PROVIDER_MODELS, PROVIDER_ID_TO_ALIAS } from "../../open-sse/config/pro
 import { FREE_PROVIDERS } from "../../src/shared/constants/providers.js";
 
 const {
-  generateFingerprint, generateSessionId, bootstrapJwt, resetJwtCache, parseJwtExp,
-  injectSystemMarker, MIMO_SYSTEM_MARKER, SESSION_AFFINITY_PREFIX, BOOTSTRAP_URL, CHAT_URL,
+  generateFingerprint,
+  generateSessionId,
+  bootstrapJwt,
+  resetJwtCache,
+  parseJwtExp,
+  injectSystemMarker,
+  MIMO_SYSTEM_MARKER,
+  BOOTSTRAP_URL,
+  CHAT_URL,
+  SESSION_AFFINITY_PREFIX,
+  USER_AGENTS,
 } = __test__;
-
-function jsonResponse(data, { ok = true, status = 200 } = {}) {
-  return { ok, status, json: async () => data };
+function jsonResponse(data, init = {}) {
+  return {
+    ok: init.ok !== false,
+    status: init.status || 200,
+    headers: new Headers(init.headers || { "Content-Type": "application/json" }),
+    json: async () => data,
+    text: async () => JSON.stringify(data),
+  };
 }
 
 // Build a fake JWT with the given exp (seconds) in the payload.
@@ -38,7 +52,6 @@ function makeJwt(expSec) {
   const payload = Buffer.from(JSON.stringify({ exp: expSec })).toString("base64url");
   return `${header}.${payload}.sig`;
 }
-
 beforeEach(() => {
   fetchMock.mockReset();
   resetJwtCache();
@@ -246,5 +259,89 @@ describe("MiMo Free provider registration", () => {
   it("lists mimo-free in the dashboard FREE_PROVIDERS catalog", () => {
     expect(FREE_PROVIDERS["mimo-free"]?.alias).toBe("mmf");
     expect(FREE_PROVIDERS["mimo-free"]?.noAuth).toBe(true);
+  });
+});
+
+describe("MIMO-06: MiMo Free Flow Policy (Deterministic)", () => {
+  let exec;
+  beforeEach(() => {
+    exec = new MimoFreeExecutor();
+    resetJwtCache();
+    fetchMock.mockReset();
+  });
+
+  it("always sends a valid Chrome User-Agent header from USER_AGENTS", async () => {
+    const headers = exec.buildHeaders({}, true);
+    expect(USER_AGENTS).toContain(headers["User-Agent"]);
+    expect(headers["User-Agent"]).toMatch(/Chrome\//);
+  });
+
+  it("includes User-Agent and client fingerprint during bootstrap", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ jwt: makeJwt(Math.floor(Date.now() / 1000) + 3600) }));
+    await bootstrapJwt();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe(BOOTSTRAP_URL);
+    expect(USER_AGENTS).toContain(options.headers["User-Agent"]);
+    const body = JSON.parse(options.body);
+    expect(body.client).toBe(generateFingerprint());
+    expect(body.client).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("handles 401 auth failure by re-bootstrapping and retrying once", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ jwt: makeJwt(Math.floor(Date.now() / 1000) + 3600) }));
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 401 });
+    fetchMock.mockResolvedValueOnce(jsonResponse({ jwt: makeJwt(Math.floor(Date.now() / 1000) + 3600) }));
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200 });
+
+    const { response } = await exec.execute({
+      model: "mimo-auto",
+      body: { messages: [{ role: "user", content: "hello" }] },
+      stream: false,
+      credentials: {},
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("bounds retry attempts to exactly 1 on consecutive 401/403 responses", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ jwt: makeJwt(Math.floor(Date.now() / 1000) + 3600) }));
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 403 });
+    fetchMock.mockResolvedValueOnce(jsonResponse({ jwt: makeJwt(Math.floor(Date.now() / 1000) + 3600) }));
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 403 });
+
+    const { response } = await exec.execute({
+      model: "mimo-auto",
+      body: { messages: [{ role: "user", content: "hello" }] },
+      stream: false,
+      credentials: {},
+    });
+
+    expect(response.status).toBe(403);
+    // Exactly 4 calls: bootstrap -> chat(403) -> re-bootstrap -> chat(403) -> terminates
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("throws clean descriptive error when bootstrap returns non-200 status", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      text: async () => "Forbidden",
+    });
+
+    await expect(bootstrapJwt()).rejects.toThrow(/MiMo bootstrap failed: 403/);
+  });
+
+  it("throws descriptive error when bootstrap response lacks JWT", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({}));
+    await expect(bootstrapJwt()).rejects.toThrow(/MiMo bootstrap returned no JWT/);
+  });
+
+  it("generates session affinity matching prefix and length", () => {
+    const sid = generateSessionId();
+    expect(sid.startsWith(SESSION_AFFINITY_PREFIX)).toBe(true);
+    expect(sid.length).toBe(SESSION_AFFINITY_PREFIX.length + 24);
   });
 });

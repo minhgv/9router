@@ -4,6 +4,8 @@ import { dbg } from "./debugLog.js";
 
 const originalFetch = globalThis.fetch;
 const proxyDispatchers = new Map();
+// P-PROXY allowlist: only http | https | socks5 are valid proxy schemes.
+const ALLOWED_PROXY_PROTOCOLS = new Set(["http:", "https:", "socks5:"]);
 
 // ─── TLS fingerprinting via got-scraping (browser-like JA3) ───────────────
 // Disabled: not in use. Kept commented for future re-enable.
@@ -184,20 +186,38 @@ function getEnvProxyUrl(targetUrl) {
 }
 
 /**
- * Normalize proxy URL (allow host:port)
+ * Normalize proxy URL (allow host:port). Enforces the P-PROXY policy at the
+ * input boundary: control characters (CR/LF/NUL/...) are rejected, and only
+ * http | https | socks5 schemes are accepted — hostile values are never
+ * handed to the transport. Throws on policy violations; callers decide
+ * strict (hard fail) vs non-strict (reject, then fall back to direct).
  */
 function normalizeProxyUrl(proxyUrl) {
   const normalizedInput = normalizeString(proxyUrl);
   if (!normalizedInput) return null;
 
-  try {
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(normalizedInput)) {
+    throw new Error("[ProxyFetch] Proxy URL rejected: control characters are not allowed");
+  }
 
-    new URL(normalizedInput);
-    return normalizedInput;
+  let candidate = normalizedInput;
+  let parsed;
+  try {
+    parsed = new URL(candidate);
   } catch {
     // Allow "127.0.0.1:7890" style values
-    return `http://${normalizedInput}`;
+    candidate = `http://${normalizedInput}`;
+    parsed = new URL(candidate);
   }
+
+  if (!ALLOWED_PROXY_PROTOCOLS.has(parsed.protocol)) {
+    throw new Error(
+      `[ProxyFetch] Proxy URL rejected: unsupported scheme "${parsed.protocol.replace(/:$/, "")}" (allowed: http, https, socks5)`
+    );
+  }
+
+  return candidate;
 }
 
 function resolveConnectionProxyUrl(targetUrl, proxyOptions) {
@@ -210,8 +230,28 @@ function resolveConnectionProxyUrl(targetUrl, proxyOptions) {
   const noProxy = normalizeString(proxyOptions?.noProxy ?? proxyOptions?.connectionNoProxy);
   if (noProxy && shouldBypassByNoProxy(targetUrl, noProxy)) return null;
 
-  return normalizeProxyUrl(proxyUrlRaw);
+  // Return the raw value: getDispatcher re-normalizes and enforces the
+  // P-PROXY allowlist at the transport boundary, so strict mode hard-fails
+  // there and non-strict mode falls back to direct egress.
+  return proxyUrlRaw;
 }
+/**
+ * Derive connection proxy options from credentials.
+ * Used when callers invoke operations (e.g. token refresh, image generation)
+ * without an explicit proxyOptions parameter, ensuring the connection proxy
+ * policy in credentials.providerSpecificData is honored.
+ */
+export function deriveConnectionProxyOptions(credentials) {
+  const psd = credentials?.providerSpecificData ?? {};
+  return {
+    connectionProxyEnabled: psd.connectionProxyEnabled === true || credentials?.connectionProxyEnabled === true,
+    connectionProxyUrl: psd.connectionProxyUrl || credentials?.connectionProxyUrl || "",
+    connectionNoProxy: psd.connectionNoProxy || credentials?.connectionNoProxy || "",
+    vercelRelayUrl: psd.vercelRelayUrl || credentials?.vercelRelayUrl || "",
+    strictProxy: psd.strictProxy === true || credentials?.strictProxy === true,
+  };
+}
+
 
 /**
  * Create proxy dispatcher lazily (undici-compatible)
@@ -307,7 +347,15 @@ export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
   }
 
   const connectionProxyUrl = resolveConnectionProxyUrl(targetUrl, proxyOptions);
-  const envProxyUrl = connectionProxyUrl ? null : normalizeProxyUrl(getEnvProxyUrl(targetUrl));
+  let envProxyUrl = null;
+  if (!connectionProxyUrl) {
+    try {
+      envProxyUrl = normalizeProxyUrl(getEnvProxyUrl(targetUrl));
+    } catch (envProxyError) {
+      console.warn(`[ProxyFetch] Invalid proxy URL in environment rejected at boundary: ${envProxyError.message}`);
+      envProxyUrl = null;
+    }
+  }
   const proxyUrl = connectionProxyUrl || envProxyUrl;
 
   // MITM DNS bypass: for known MITM-intercepted hosts, resolve real IP to avoid DNS spoof

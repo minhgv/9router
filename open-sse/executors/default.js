@@ -4,7 +4,7 @@ import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE, selec
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
 import { OAUTH_ENDPOINTS, buildKimiHeaders } from "../config/appConstants.js";
 import { buildClineHeaders } from "../shared/clineAuth.js";
-import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { proxyAwareFetch, deriveConnectionProxyOptions } from "../utils/proxyFetch.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { stripUnsupportedParams } from "../translator/concerns/paramSupport.js";
 
@@ -219,19 +219,19 @@ export class DefaultExecutor extends BaseExecutor {
   async refreshCredentials(credentials, log, proxyOptions = null) {
     if (!credentials.refreshToken) return null;
 
+    const resolvedProxyOptions = proxyOptions ?? deriveConnectionProxyOptions(credentials);
     const refreshers = {
-      claude: () => this.refreshFromGrant(credentials, proxyOptions),
-      codex: () => this.refreshFromGrant(credentials, proxyOptions),
-      iflow: () => this.refreshIflow(credentials.refreshToken, proxyOptions),
-      gemini: () => this.refreshFromGrant(credentials, proxyOptions),
-      kiro: () => this.refreshKiro(credentials.refreshToken, proxyOptions),
-      cline: () => this.refreshCline(credentials.refreshToken, proxyOptions),
-      clinepass: () => this.refreshCline(credentials.refreshToken, proxyOptions),
-      kimi: () => this.refreshKimi(credentials, proxyOptions),
-      "kimi-coding": () => this.refreshKimi(credentials, proxyOptions),
-      kilocode: () => this.refreshKilocode(credentials.refreshToken, proxyOptions)
+      claude: () => this.refreshFromGrant(credentials, resolvedProxyOptions),
+      codex: () => this.refreshFromGrant(credentials, resolvedProxyOptions),
+      iflow: () => this.refreshIflow(credentials.refreshToken, resolvedProxyOptions),
+      gemini: () => this.refreshFromGrant(credentials, resolvedProxyOptions),
+      kiro: () => this.refreshKiro(credentials.refreshToken, resolvedProxyOptions),
+      cline: () => this.refreshCline(credentials.refreshToken, resolvedProxyOptions),
+      clinepass: () => this.refreshCline(credentials.refreshToken, resolvedProxyOptions),
+      kimi: () => this.refreshKimi(credentials, resolvedProxyOptions),
+      "kimi-coding": () => this.refreshKimi(credentials, resolvedProxyOptions),
+      kilocode: () => this.refreshKilocode(credentials.refreshToken, resolvedProxyOptions)
     };
-
     const refresher = refreshers[this.provider];
     if (!refresher) return null;
 
@@ -240,6 +240,10 @@ export class DefaultExecutor extends BaseExecutor {
       if (result) log?.info?.("TOKEN", `${this.provider} refreshed`);
       return result;
     } catch (error) {
+      // P-REFRESH/P-PROXY: a strict-proxy egress failure must surface as a
+      // bounded rejection, never degrade into warn-and-null (which would hand
+      // the caller the stale credentials as if refresh never ran).
+      if (/Proxy required but failed/.test(error?.message || "")) throw error;
       log?.error?.("TOKEN", `${this.provider} refresh error: ${error.message}`);
       return null;
     }

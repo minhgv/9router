@@ -8,6 +8,19 @@ function toBoolean(value) {
 }
 
 const VALID_PROXY_TYPES = ["http", "vercel", "cloudflare", "deno"];
+// P-PROXY: only http | https | socks5 are valid proxy schemes; control
+// characters are never accepted at the input boundary.
+const ALLOWED_PROXY_PROTOCOLS = new Set(["http:", "https:", "socks5:"]);
+
+function isValidProxyUrl(value) {
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(value)) return false;
+  try {
+    return ALLOWED_PROXY_PROTOCOLS.has(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
 
 function normalizeProxyPoolInput(body = {}) {
   const name = typeof body?.name === "string" ? body.name.trim() : "";
@@ -25,6 +38,9 @@ function normalizeProxyPoolInput(body = {}) {
     return { error: "Proxy URL is required" };
   }
 
+  if (!isValidProxyUrl(proxyUrl)) {
+    return { error: "Proxy URL must use http, https or socks5 scheme without control characters" };
+  }
   return { name, proxyUrl, noProxy, isActive, strictProxy, type };
 }
 

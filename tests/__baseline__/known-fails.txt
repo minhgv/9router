@@ -1,24 +1,239 @@
-tests/unit/claude-header-forwarding.test.js :: proxyAwareFetch — api.anthropic.com routing routes api.anthropic.com to gotScraping (non-streaming) and returns ok response
-tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import extracts tokens using exact keys
-tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import falls back to fuzzy key matching on macOS when exact keys are missing
-tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import linux uses single hardcoded path and original error message
-tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import returns descriptive error if macOS db file exists but cannot be opened
-tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import returns login-prompt error when tokens are missing even after fallback
-tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import returns not-found when no macOS cursor db paths are accessible
-tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import unsupported platform returns 400
-tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import unwraps JSON-encoded string values
-tests/unit/openai-to-claude.test.js :: openaiToClaudeResponse omits empty Read pages tool argument before emitting Claude input deltas
-tests/unit/rtk.test.js :: RTK flag default off, toggle works
-tests/unit/rtk.test.js :: compressMessages (disabled) returns null when disabled
-tests/unit/rtk.test.js :: compressMessages (enabled) compresses Claude array-form tool_result text parts
-tests/unit/rtk.test.js :: compressMessages (enabled) compresses Claude string-form tool_result
-tests/unit/rtk.test.js :: compressMessages (enabled) compresses OpenAI tool message (string content)
-tests/unit/rtk.test.js :: compressMessages (enabled) handles mix of messages without crashing
-tests/unit/rtk.test.js :: compressMessages (enabled) never produces empty content (R14 guard)
-tests/unit/rtk.test.js :: compressMessages (enabled) skips below MIN_COMPRESS_SIZE (<500 bytes)
-tests/unit/rtk.test.js :: compressMessages (enabled) skips is_error tool_result
-tests/unit/rtk.test.js :: compressMessages (enabled) skips when body has no messages
-tests/unit/translator-request-normalization.test.js :: request normalization claudeToOpenAIRequest flattens text-only content arrays into string
-tests/unit/translator-request-normalization.test.js :: request normalization filterToOpenAIFormat flattens text-only arrays to string
-tests/unit/translator-request-normalization.test.js :: request normalization parseSSELine supports provider raw NDJSON stream lines
-tests/unit/translator-request-normalization.test.js :: request normalization translateRequest keeps /v1/messages Claude->OpenAI text payloads string-safe
+tests/translator/bugs-toClaude-context.test.js :: OpenAI → Claude context mapping > assistant reasoning_content becomes a thinking block
+tests/translator/claude-kiro-direct.test.js :: Claude → Kiro (direct route) > injects thinking_mode tag when model implies thinking
+tests/translator/claude-kiro-direct.test.js :: Claude → Kiro (direct route) > does not send additionalModelRequestFields for Kiro models without effort support
+tests/translator/claude-kiro-direct.test.js :: Claude → Kiro (direct route) > normalizes an unsupported Kiro intensity suffix while preserving agentic behavior
+tests/translator/claude-kiro-direct.test.js :: Claude → Kiro (direct route) > maps output_config.effort high to Kiro CLI-style additionalModelRequestFields for effort models
+tests/translator/claude-kiro-direct.test.js :: Claude → Kiro (direct route) > keeps the legacy thinking fallback for unsupported GPT-5.6 effort auto
+tests/translator/claude-kiro-direct.test.js :: Claude → Kiro (direct route) > keeps the legacy thinking fallback for unsupported GPT-5.6 effort minimal
+tests/translator/claude-kiro-direct.test.js :: Claude → Kiro (direct route) > keeps the legacy thinking fallback for unsupported GPT-5.6 effort ultra
+tests/translator/claude-kiro-direct.test.js :: Claude → Kiro (direct route) > sends Claude system as top-level systemPrompt and keeps a user-content fallback
+tests/translator/claude-kiro-direct.test.js :: Claude → Kiro (direct route) > keeps top-level systemPrompt stable across turns
+tests/translator/golden-request.test.js :: GOLDEN request: OpenAI → Kiro > full body (image base64 + tool_result)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > alicode → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > alicode-intl → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > alims-intl → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > alitp-intl → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > anthropic → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > api-airforce → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > assemblyai → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > baidu → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > bazaarlink → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > blackbox → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > bluesminds → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > byteplus → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > cerebras → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > chutes → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > claude → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > cline → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > clinepass → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > cloudflare-ai → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > codebuddy-cn → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > codebuddy-intl → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > cohere → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > deepgram → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > deepseek → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > devin → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > featherless → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > fireworks → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > gemini → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > gitlab → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > glm → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > glm-cn → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > grok-cli → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > groq → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > hyperbolic → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > kilo-gateway → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > kilocode → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > kimchi → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > kimi → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > llm7 → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > minimax → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > minimax-cn → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > mistral → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > mmf → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > morph → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > nanobanana → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > nebius → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > nvidia → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > ollama → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > openai → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > openrouter → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > perplexity → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > perplexity-agent → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > poolside → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > sambanova → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > siliconflow → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > tencent → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > together → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > tokenrouter → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > venice → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > vercel-ai-gateway → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > volcengine-ark → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > xai → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > xiaomi-mimo → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildUrl (default executor providers) > zed → url (stream + non-stream)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > alicode → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > alicode-intl → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > alims-intl → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > alitp-intl → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > anthropic → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > api-airforce → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > assemblyai → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > baidu → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > bazaarlink → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > blackbox → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > bluesminds → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > byteplus → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > cerebras → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > chutes → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > claude → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > cline → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > clinepass → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > cloudflare-ai → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > codebuddy-cn → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > codebuddy-intl → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > cohere → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > deepgram → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > deepseek → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > devin → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > featherless → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > fireworks → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > gemini → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > gitlab → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > glm → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > glm-cn → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > grok-cli → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > groq → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > hyperbolic → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > kilo-gateway → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > kilocode → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > kimchi → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > kimi → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > llm7 → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > minimax → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > minimax-cn → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > mistral → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > mmf → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > morph → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > nanobanana → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > nebius → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > nvidia → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > ollama → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > openai → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > openrouter → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > perplexity → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > perplexity-agent → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > poolside → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > sambanova → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > siliconflow → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > tencent → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > together → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > tokenrouter → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > venice → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > vercel-ai-gateway → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > volcengine-ark → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > xai → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > xiaomi-mimo → headers (apiKey / oauth)
+tests/translator/golden-url-header.test.js :: GOLDEN buildHeaders (default executor providers) > zed → headers (apiKey / oauth)
+tests/unit/claude-header-forwarding.test.js :: proxyAwareFetch — api.anthropic.com routing > routes api.anthropic.com to gotScraping (non-streaming) and returns ok response
+tests/unit/combo-autoswitch.test.js :: detectRequiredCapabilities > web_search tool -> search
+tests/unit/combo-autoswitch.test.js :: reorderByCapabilities > keeps order when no model matches
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > google.protobuf.Value round-trip > encodes/decodes null
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > google.protobuf.Value round-trip > encodes/decodes bool true
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > google.protobuf.Value round-trip > encodes/decodes bool false
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > google.protobuf.Value round-trip > encodes/decodes string
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > google.protobuf.Value round-trip > encodes/decodes integer
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > google.protobuf.Value round-trip > encodes/decodes float
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > google.protobuf.Value round-trip > encodes/decodes empty object
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > google.protobuf.Value round-trip > encodes/decodes flat object
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > google.protobuf.Value round-trip > encodes/decodes nested object
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > google.protobuf.Value round-trip > encodes/decodes array of mixed
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > google.protobuf.Value round-trip > encodes/decodes deeply nested
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpToolDefinition > encodes name, description, input_schema (Value), provider, tool_name
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpToolDefinition > preserves nested JSON-schema types
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpToolDefinition > accepts flat tool shape (no .function wrapper)
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > encodeMcpTools > produces empty bytes for no tools
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > encodeMcpTools > wraps multiple tool defs as repeated field 1
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpArgs decode > decodes name, toolName, toolCallId, and typed args map
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpArgs decode > handles empty args map
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpResult success > builds success with single text content
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpResult success > builds success with multiple text items
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpResult success > marks is_error=true
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpResult image content > builds image item with raw bytes + mime type
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpResult image content > builds mixed text + image content
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpResult error / toolNotFound > builds error result (field 2)
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService codec (cursorProtobuf.js) > McpResult error / toolNotFound > builds toolNotFound result (field 5)
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService executor helpers (cursor.js) > isAgentCapableRequest > accepts plain text content
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService executor helpers (cursor.js) > isAgentCapableRequest > accepts array text content
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService executor helpers (cursor.js) > isAgentCapableRequest > accepts request with tools declared
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService executor helpers (cursor.js) > isAgentCapableRequest > accepts history with assistant tool_calls + tool results
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService executor helpers (cursor.js) > isAgentCapableRequest > rejects non-text (image) content
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService executor helpers (cursor.js) > isAgentCapableRequest > rejects missing messages
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService executor helpers (cursor.js) > buildAgentRunFrame > encodes a text-only run request with system + model
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService executor helpers (cursor.js) > buildAgentRunFrame > encodes mcp_tools (field 4) when tools are provided
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService executor helpers (cursor.js) > buildAgentRunFrame > omits mcp_tools when no tools provided
+tests/unit/cursor-agent-proto.test.js :: Cursor AgentService executor helpers (cursor.js) > buildAgentRunFrame > encodes conversation_history from prior turns including tool calls/results
+tests/unit/cursor-models.test.js :: Cursor live model catalog > fetches the account-specific catalog and caches it
+tests/unit/db-concurrent.test.js :: DB Concurrency — atomic safety > 100 parallel saveRequestUsage → no count loss
+tests/unit/db-concurrent.test.js :: DB Concurrency — atomic safety > mixed concurrent: usage + details + connections + aliases
+tests/unit/db-concurrent.test.js :: DB Concurrency — atomic safety > daily summary aggregates correctly under parallel writes
+tests/unit/executor-const-guard.test.js :: antigravity retry (intentional change: 429=6, 503=3) > 429 attempts = 6
+tests/unit/force-stream-config.test.js :: forceStream provider config > keeps forced-stream providers streaming for JSON clients when body.stream is undefined
+tests/unit/force-stream-config.test.js :: forceStream provider config > keeps forced-stream providers streaming for JSON clients when body.stream is false
+tests/unit/gemini-36-integration.test.js :: Gemini Cloud Code endpoint isolation > uses the prod cloudcode host for Antigravity discovery but daily for chat
+tests/unit/image-fetch-hardening.test.js :: fetchImageAsBase64 hardening > accepts valid PNG from public host
+tests/unit/kiro-external-idp.test.js :: Kiro external_idp (CLIProxyAPI) import and refresh > adds CodeWhisperer external IdP headers and endpoint ordering
+tests/unit/kiro-terminal-integrity.test.js :: Kiro terminal integrity recovery > surfaces retry HTTP failures as SSE after heartbeat commits headers
+tests/unit/kiro-terminal-integrity.test.js :: Kiro terminal integrity recovery > bounds the retry HTTP error body
+tests/unit/mimo-free.live.test.js :: MiMo Free anti-abuse gate (live) > chat WITH Chrome User-Agent → 200
+tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import > returns not-found when no macOS cursor db paths are accessible
+tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import > returns descriptive error if macOS db file exists but cannot be opened
+tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import > extracts tokens using exact keys
+tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import > unwraps JSON-encoded string values
+tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import > falls back to fuzzy key matching on macOS when exact keys are missing
+tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import > returns login-prompt error when tokens are missing even after fallback
+tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import > linux uses single hardcoded path and original error message
+tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import > unsupported platform returns 400
+tests/unit/openai-to-claude.test.js :: openaiToClaudeResponse > omits empty Read pages tool argument before emitting Claude input deltas
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > maps reasoning_effort low to max_thinking_length 1024
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > maps reasoning_effort high to max_thinking_length 24576
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > keeps the legacy thinking fallback for unsupported GPT-5.6 effort auto
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > keeps the legacy thinking fallback for unsupported GPT-5.6 effort minimal
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > keeps the legacy thinking fallback for unsupported GPT-5.6 effort ultra
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > keeps the thinking-alias fallback when GPT effort is blank
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > does not send additionalModelRequestFields for legacy Kiro model ids
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > normalizes unsupported Kiro intensity suffix for claude-sonnet-4.5-thinking-agentic(high)
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > normalizes unsupported Kiro intensity suffix for glm-5-thinking-agentic(medium)
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > does not send additionalModelRequestFields for date-suffixed Claude 4 model ids
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > does not send additionalModelRequestFields for pre-4 legacy Kiro model ids
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > does not send additionalModelRequestFields for prefixed pre-4 legacy Kiro model ids
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > does not send Claude-specific additionalModelRequestFields for prefixed non-Claude aliases
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > does not send Claude-specific additionalModelRequestFields for non-Claude aliases
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > clamps reasoning_effort max to Kiro max_thinking_length 32000
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > clamps OpenAI Responses reasoning.effort xhigh to max_thinking_length 32000
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > uses Claude thinking.budget_tokens as max_thinking_length
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > uses the default budget for synthetic -thinking models with no explicit config
+tests/unit/openai-to-kiro.test.js :: openaiToKiroRequest > thinking budget > keeps top-level systemPrompt stable across turns
+tests/unit/request-details-tab.test.js :: request details — tab crash-risk cases > oversized field → stored truncated + reparseable (no circular)
+tests/unit/request-details-tab.test.js :: getDistinctProviders — providers route (no full-row parse) > returns unique provider list without parsing data blobs
+tests/unit/security-audit.test.js :: AUDIT-002: API key masking > source should contain maskApiKey function
+tests/unit/security-audit.test.js :: AUDIT-002: API key masking > getUsageHistory should use apiKeyMasked instead of apiKey
+tests/unit/security-audit.test.js :: AUDIT-002: API key masking > getUsageStats should use apiKeyMasked in byApiKey entries
+tests/unit/security-audit.test.js :: AUDIT-002: API key masking > byApiKey object keys should use masked key, not raw key
+tests/unit/security-audit.test.js :: AUDIT-003: Proxy URL validation > source should contain validateProxyUrl function
+tests/unit/security-audit.test.js :: AUDIT-018: XSS escaping in OAuth callback > source should contain escapeHtml function
+tests/unit/security-audit.test.js :: AUDIT-018: XSS escaping in OAuth callback > should escape ampersand, angle brackets, and quotes
+tests/unit/security-audit.test.js :: AUDIT-018: XSS escaping in OAuth callback > should use safeMessage in rendered HTML, not raw message
+tests/unit/security-audit.test.js :: AUDIT-004: Atomic lock file for MITM startup > manager.js should define LOCK_FILE constant
+tests/unit/security-audit.test.js :: AUDIT-004: Atomic lock file for MITM startup > should use O_EXCL flag (wx) for atomic creation
+tests/unit/security-audit.test.js :: AUDIT-004: Atomic lock file for MITM startup > should clean up lock file on all exit paths
+tests/unit/security-audit.test.js :: AUDIT-001: Synchronous restart guard > mitmIsRestarting should be set before first await expression
+tests/unit/security-audit.test.js :: AUDIT-001: Synchronous restart guard > mitmIsRestarting should be reset on max-restarts early return
+tests/unit/translator-helpers-edge.test.js :: normalizeClaudePassthrough — haiku adaptive thinking (docs 11 §1) > hoists mid-conversation system messages into top-level system
+tests/unit/translator-request-normalization.test.js :: request normalization > claudeToOpenAIRequest flattens text-only content arrays into string
+tests/unit/translator-request-normalization.test.js :: request normalization > filterToOpenAIFormat flattens text-only arrays to string
+tests/unit/translator-request-normalization.test.js :: request normalization > translateRequest keeps /v1/messages Claude->OpenAI text payloads string-safe
+tests/unit/translator-request-normalization.test.js :: request normalization > parseSSELine supports provider raw NDJSON stream lines
+tests/unit/windsurf-executor.test.js :: WindsurfExecutor class > constructor wires config from PROVIDERS.windsurf
+tests/unit/windsurf-executor.test.js :: WindsurfExecutor class > buildUrl returns the GetChatMessage endpoint
+tests/unit/windsurf-executor.test.js :: WindsurfExecutor class > PROVIDERS.windsurf baseUrl is the chat endpoint (registry in sync)

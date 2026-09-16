@@ -5,7 +5,8 @@
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { ANTHROPIC_API_VERSION } from "../../providers/shared.js";
 import { U, parseResetTime } from "./shared.js";
-
+import { parseRetryAfter } from "../accountFallback.js";
+import { MAX_RATE_LIMIT_COOLDOWN_MS } from "../../config/errorConfig.js";
 // Claude API config (urls from registry, apiVersion is header logic kept here)
 const CLAUDE_CONFIG = {
   oauthUsageUrl: U("claude").oauthUrl,
@@ -135,9 +136,13 @@ async function fetchClaudeUsageRaw(accessToken, proxyOptions = null) {
 
     // Cool down OAuth usage polling after a 429 (quota endpoint only)
     if (oauthResponse.status === 429) {
-      oauthCooldown.set(accessToken, Date.now() + OAUTH_429_COOLDOWN_MS);
+      const retryHeader = oauthResponse.headers?.get?.("retry-after");
+      const parsedDelay = parseRetryAfter(retryHeader);
+      const cooldownMs = parsedDelay != null && parsedDelay > 0
+        ? Math.min(parsedDelay, MAX_RATE_LIMIT_COOLDOWN_MS)
+        : OAUTH_429_COOLDOWN_MS;
+      oauthCooldown.set(accessToken, Date.now() + cooldownMs);
     }
-
     // Fallback: legacy settings + org usage endpoint
     console.warn(`[Claude Usage] OAuth endpoint returned ${oauthResponse.status}, falling back to legacy`);
     return await getClaudeUsageLegacy(accessToken, proxyOptions);

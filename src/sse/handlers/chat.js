@@ -308,7 +308,6 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       onCredentialsRefreshed: async (newCreds) => {
         await updateProviderCredentials(credentials.connectionId, {
           ...newCreds,
-          existingProviderSpecificData: credentials.providerSpecificData,
           testStatus: "active"
         });
       },

@@ -1,8 +1,100 @@
-import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS } from "../config/errorConfig.js";
+import {
+  ERROR_RULES,
+  ERROR_CATEGORIES,
+  BACKOFF_CONFIG,
+  TRANSIENT_COOLDOWN_MS,
+  MAX_RATE_LIMIT_COOLDOWN_MS,
+  classifyError,
+} from "../config/errorConfig.js";
+
+/**
+ * Parse HTTP Retry-After header value to delay in milliseconds.
+ * Supports:
+ *   - Delta-seconds (numeric string or number, e.g. "120", 120, "5.5")
+ *   - HTTP-date (IMF-fixdate / RFC 7231 string, e.g. "Wed, 21 Oct 2026 07:28:00 GMT")
+ * @param {string|number|null|undefined} headerValue
+ * @returns {number|null} Milliseconds to wait, or null if unparseable / absent
+ */
+export function parseRetryAfter(headerValue) {
+  if (headerValue == null) return null;
+
+  if (typeof headerValue === "number") {
+    if (Number.isFinite(headerValue) && headerValue >= 0) {
+      return Math.round(headerValue * 1000);
+    }
+    return null;
+  }
+
+  if (typeof headerValue === "string") {
+    const trimmed = headerValue.trim();
+    if (!trimmed) return null;
+
+    // Check for delta-seconds (integer or float)
+    if (/^\d+(\.\d+)?$/.test(trimmed)) {
+      const seconds = parseFloat(trimmed);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.round(seconds * 1000);
+      }
+      return null;
+    }
+
+    // Try HTTP-date
+    const parsedDate = Date.parse(trimmed);
+    if (!Number.isNaN(parsedDate)) {
+      const delayMs = parsedDate - Date.now();
+      return Math.max(0, delayMs);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parse reset timestamp from various formats to epoch milliseconds.
+ * Supports:
+ *   - Date object
+ *   - Unix epoch seconds (e.g. 1774000000) or milliseconds (e.g. 1774000000000)
+ *   - Numeric string
+ *   - ISO / RFC date string
+ * @param {number|string|Date|null|undefined} resetValue
+ * @returns {number|null} Epoch timestamp in milliseconds, or null if invalid
+ */
+export function parseResetTimestamp(resetValue) {
+  if (resetValue == null) return null;
+
+  if (resetValue instanceof Date) {
+    const time = resetValue.getTime();
+    return Number.isNaN(time) ? null : time;
+  }
+
+  if (typeof resetValue === "number") {
+    if (!Number.isFinite(resetValue) || resetValue <= 0) return null;
+    // < 1e11 represents seconds (year 1973 to ~5138)
+    return resetValue < 1e11 ? Math.round(resetValue * 1000) : Math.round(resetValue);
+  }
+
+  if (typeof resetValue === "string") {
+    const trimmed = resetValue.trim();
+    if (!trimmed) return null;
+
+    if (/^\d+(\.\d+)?$/.test(trimmed)) {
+      const num = parseFloat(trimmed);
+      if (Number.isFinite(num) && num > 0) {
+        return num < 1e11 ? Math.round(num * 1000) : Math.round(num);
+      }
+      return null;
+    }
+
+    const parsed = Date.parse(trimmed);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+
+  return null;
+}
 
 /**
  * Calculate exponential backoff cooldown for rate limits (429)
- * Level 1: 1s, Level 2: 2s, Level 3: 4s... → max 4 min
+ * Level 1: 2s, Level 2: 4s, Level 3: 8s... → max 5 min
  * @param {number} backoffLevel - Current backoff level
  * @returns {number} Cooldown in milliseconds
  */
@@ -15,39 +107,69 @@ export function getQuotaCooldown(backoffLevel = 0) {
 /**
  * Check if error should trigger account fallback (switch to next account)
  * Config-driven: matches ERROR_RULES top-to-bottom (text rules first, then status)
+ * Supports Retry-After / reset timestamp override before bounded backoff.
  * @param {number} status - HTTP status code
- * @param {string} errorText - Error message text
+ * @param {string|object} errorText - Error message text
  * @param {number} backoffLevel - Current backoff level for exponential backoff
- * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number }}
+ * @param {object} [options] - Optional override parameters: { retryAfterMs, resetsAtMs, retryAfterHeader, resetsAt }
+ * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number, category: string }}
  */
-export function checkFallbackError(status, errorText, backoffLevel = 0) {
-  const lowerError = errorText
-    ? (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase()
-    : "";
+export function checkFallbackError(status, errorText, backoffLevel = 0, options = {}) {
+  const classification = classifyError(status, errorText);
 
-  for (const rule of ERROR_RULES) {
-    // Text-based rule: match substring in error message
-    if (rule.text && lowerError && lowerError.includes(rule.text)) {
-      if (rule.backoff) {
-        const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
-        return { shouldFallback: true, cooldownMs: getQuotaCooldown(newLevel), newBackoffLevel: newLevel };
-      }
-      return { shouldFallback: true, cooldownMs: rule.cooldownMs };
-    }
-
-    // Status-based rule: match HTTP status code
-    if (rule.status && rule.status === status) {
-      if (rule.backoff) {
-        const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
-        return { shouldFallback: true, cooldownMs: getQuotaCooldown(newLevel), newBackoffLevel: newLevel };
-      }
-      return { shouldFallback: true, cooldownMs: rule.cooldownMs };
-    }
+  if (!classification.shouldFallback) {
+    return {
+      shouldFallback: false,
+      cooldownMs: 0,
+      newBackoffLevel: backoffLevel,
+      category: classification.category
+    };
   }
 
-  // Default: transient cooldown for any unmatched error
-  return { shouldFallback: true, cooldownMs: TRANSIENT_COOLDOWN_MS };
+  // Parse explicit Retry-After or resetsAt if provided in options
+  const explicitRetryAfterMs = options.retryAfterMs ?? parseRetryAfter(options.retryAfterHeader);
+  const explicitResetsAtMs = options.resetsAtMs ?? parseResetTimestamp(options.resetsAt);
+
+  if (explicitRetryAfterMs != null && explicitRetryAfterMs >= 0) {
+    const cooldownMs = Math.min(explicitRetryAfterMs, MAX_RATE_LIMIT_COOLDOWN_MS);
+    return {
+      shouldFallback: true,
+      cooldownMs,
+      newBackoffLevel: 0,
+      category: classification.category
+    };
+  }
+
+  if (explicitResetsAtMs != null && explicitResetsAtMs > Date.now()) {
+    const cooldownMs = Math.min(explicitResetsAtMs - Date.now(), MAX_RATE_LIMIT_COOLDOWN_MS);
+    return {
+      shouldFallback: true,
+      cooldownMs,
+      newBackoffLevel: 0,
+      category: classification.category
+    };
+  }
+
+  if (classification.backoff) {
+    const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
+    return {
+      shouldFallback: true,
+      cooldownMs: getQuotaCooldown(newLevel),
+      newBackoffLevel: newLevel,
+      category: classification.category
+    };
+  }
+
+  const cooldownMs = classification.cooldownMs ?? TRANSIENT_COOLDOWN_MS;
+  return {
+    shouldFallback: true,
+    cooldownMs,
+    newBackoffLevel: backoffLevel,
+    category: classification.category
+  };
 }
+
+export { ERROR_CATEGORIES };
 
 /**
  * Check if account is currently unavailable (cooldown not expired)
@@ -199,17 +321,22 @@ export function resetAccountState(account) {
  * @param {string} errorText - Error message
  * @returns {object} Updated account with error state
  */
-export function applyErrorState(account, status, errorText) {
+export function applyErrorState(account, status, errorText, options = {}) {
   if (!account) return account;
 
   const backoffLevel = account.backoffLevel || 0;
-  const { cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel);
+  const { cooldownMs, newBackoffLevel, category } = checkFallbackError(status, errorText, backoffLevel, options);
 
   return {
     ...account,
     rateLimitedUntil: cooldownMs > 0 ? getUnavailableUntil(cooldownMs) : null,
     backoffLevel: newBackoffLevel ?? backoffLevel,
-    lastError: { status, message: errorText, timestamp: new Date().toISOString() },
-    status: "error"
+    lastError: {
+      status,
+      message: typeof errorText === "string" ? errorText : JSON.stringify(errorText),
+      category,
+      timestamp: new Date().toISOString()
+    },
+    status: cooldownMs > 0 ? "error" : (account.status || "active")
   };
 }

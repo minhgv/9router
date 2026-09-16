@@ -1,6 +1,12 @@
-// Re-export from open-sse with local logger
+import { v4 as uuidv4 } from "uuid";
 import * as log from "../utils/logger.js";
-import { updateProviderConnection } from "../../lib/localDb.js";
+import {
+  updateProviderConnection,
+  acquireRefreshLease,
+  commitRefreshedCredentials,
+  releaseRefreshLease,
+  failRefreshWithStaleProtection,
+} from "../../lib/localDb.js";
 import {
   getProjectIdForConnection,
   invalidateProjectId,
@@ -20,7 +26,8 @@ import {
   formatProviderCredentials as _formatProviderCredentials,
   getAllAccessTokens as _getAllAccessTokens,
   refreshKiroToken as _refreshKiroToken,
-  getRefreshLeadMs as _getRefreshLeadMs
+  getRefreshLeadMs as _getRefreshLeadMs,
+  isUnrecoverableRefreshError,
 } from "open-sse/services/tokenRefresh.js";
 import {
   refreshProviderCredentials as _refreshProviderCredentials,
@@ -181,18 +188,20 @@ export async function updateProviderCredentials(connectionId, newCredentials) {
     }
     if (newCredentials.providerSpecificData) {
       updates.providerSpecificData = {
-        ...(newCredentials.existingProviderSpecificData || {}),
         ...newCredentials.providerSpecificData,
       };
     }
     if (newCredentials.copilotToken || newCredentials.copilotTokenExpiresAt) {
       updates.providerSpecificData = {
-        ...(updates.providerSpecificData || newCredentials.existingProviderSpecificData || {}),
+        ...(updates.providerSpecificData || {}),
         ...(newCredentials.copilotToken ? { copilotToken: newCredentials.copilotToken } : {}),
         ...(newCredentials.copilotTokenExpiresAt ? { copilotTokenExpiresAt: newCredentials.copilotTokenExpiresAt } : {}),
       };
     }
     if (newCredentials.projectId)            updates.projectId = newCredentials.projectId;
+    if (newCredentials.expectedGeneration !== undefined) updates.expectedGeneration = newCredentials.expectedGeneration;
+    if (newCredentials.credentialGeneration !== undefined) updates.credentialGeneration = newCredentials.credentialGeneration;
+    if (newCredentials.testStatus !== undefined) updates.testStatus = newCredentials.testStatus;
 
     const result = await updateProviderConnection(connectionId, updates);
     log.info("TOKEN_REFRESH", "Credentials updated in localDb", {
@@ -223,6 +232,7 @@ export async function updateProviderCredentials(connectionId, newCredentials) {
  */
 export async function checkAndRefreshToken(provider, credentials, options = {}) {
   let creds = { ...credentials };
+  const connectionId = creds.connectionId || creds.id;
   if (!creds.connectionId && creds.id) {
     creds.connectionId = creds.id;
   }
@@ -242,32 +252,116 @@ export async function checkAndRefreshToken(provider, credentials, options = {}) 
       lastRefreshAt: creds.lastRefreshAt || null,
     });
 
-    const newCreds = await _refreshProviderCredentials(provider, creds, log);
-    if (newCreds?.accessToken || newCreds?.apiKey || newCreds?.copilotToken) {
-      const mergedCreds = {
-        ...newCreds,
-        existingProviderSpecificData: creds.providerSpecificData,
-      };
+    if (connectionId) {
+      const leaseOwner = uuidv4();
+      const leaseResult = await acquireRefreshLease(connectionId, {
+        expectedGeneration: creds.credentialGeneration,
+        ownerId: leaseOwner,
+        leaseTtlMs: 30000,
+      });
 
-      // Persist to DB (non-blocking path continues below)
-      await updateProviderCredentials(creds.connectionId, mergedCreds);
+      if (!leaseResult.success) {
+        log.info("TOKEN_REFRESH", "Skipping refresh, lease not acquired", {
+          connectionId,
+          reason: leaseResult.reason,
+          currentGeneration: leaseResult.currentGeneration,
+          supportsCrossProcessLease: leaseResult.supportsCrossProcessLease,
+        });
+        if (leaseResult.connection) {
+          creds = { ...creds, ...leaseResult.connection, connectionId };
+        }
+      } else {
+        if (!leaseResult.supportsCrossProcessLease) {
+          log.debug?.("TOKEN_REFRESH", "DB driver does not support cross-process lease; running in single-process mode", {
+            connectionId,
+          });
+        }
+        const expectedGen = leaseResult.credentialGeneration;
+        let newCreds = null;
+        let refreshError = null;
 
-      creds = {
-        ...creds,
-        ...newCreds,
-        expiresAt: newCreds.expiresIn
-          ? toExpiresAt(newCreds.expiresIn)
-          : normalizeExpiresAt(newCreds.expiresAt) || newCreds.expiresAt || creds.expiresAt,
-        providerSpecificData: newCreds.providerSpecificData
-          ? { ...creds.providerSpecificData, ...newCreds.providerSpecificData }
-          : creds.providerSpecificData,
-      };
+        try {
+          // Network I/O outside DB transaction
+          newCreds = await _refreshProviderCredentials(provider, creds, log);
+        } catch (err) {
+          refreshError = err;
+        }
 
-      // Non-blocking: refresh projectId with the new access token
-      _refreshProjectId(provider, creds.connectionId, creds.accessToken);
+        if (newCreds && !isUnrecoverableRefreshError(newCreds)) {
+          if (newCreds.accessToken || newCreds.apiKey || newCreds.copilotToken) {
+            const mergedCreds = {
+              ...newCreds,
+              providerSpecificData: {
+                ...(creds.providerSpecificData || {}),
+                ...(newCreds.providerSpecificData || {}),
+                ...(newCreds.copilotToken ? { copilotToken: newCreds.copilotToken } : {}),
+                ...(newCreds.copilotTokenExpiresAt ? { copilotTokenExpiresAt: newCreds.copilotTokenExpiresAt } : {}),
+              },
+            };
+
+            const commitResult = await commitRefreshedCredentials(connectionId, {
+              leaseOwner,
+              expectedGeneration: expectedGen,
+              newCredentials: mergedCreds,
+            });
+
+            if (commitResult.success) {
+              creds = {
+                ...creds,
+                ...commitResult.connection,
+                connectionId,
+              };
+              _refreshProjectId(provider, connectionId, creds.accessToken);
+            } else {
+              log.warn("TOKEN_REFRESH", "Commit refresh failed (CAS conflict)", {
+                connectionId,
+                reason: commitResult.reason,
+              });
+              if (commitResult.connection) {
+                creds = { ...creds, ...commitResult.connection, connectionId };
+              }
+            }
+          } else {
+            await releaseRefreshLease(connectionId, { leaseOwner });
+          }
+        } else if (isUnrecoverableRefreshError(newCreds)) {
+          log.error("TOKEN_REFRESH", "Unrecoverable refresh error detected", {
+            connectionId,
+            error: newCreds.error,
+            code: newCreds.code,
+          });
+          await failRefreshWithStaleProtection(connectionId, {
+            leaseOwner,
+            expectedGeneration: expectedGen,
+            error: newCreds.description || newCreds.error || "OAuth refresh token invalid",
+            errorCode: newCreds.code || newCreds.error || "invalid_grant",
+            isPermanent: true,
+          });
+        } else {
+          // Temporary error or null
+          await releaseRefreshLease(connectionId, { leaseOwner });
+          if (refreshError) {
+            log.warn("TOKEN_REFRESH", `Network error during refresh: ${refreshError.message}`);
+          }
+        }
+      }
+    } else {
+      // In-memory credential without DB connectionId
+      const newCreds = await _refreshProviderCredentials(provider, creds, log);
+      if (newCreds?.accessToken || newCreds?.apiKey || newCreds?.copilotToken) {
+        creds = {
+          ...creds,
+          ...newCreds,
+          expiresAt: newCreds.expiresIn
+            ? toExpiresAt(newCreds.expiresIn)
+            : normalizeExpiresAt(newCreds.expiresAt) || newCreds.expiresAt || creds.expiresAt,
+          providerSpecificData: newCreds.providerSpecificData
+            ? { ...creds.providerSpecificData, ...newCreds.providerSpecificData }
+            : creds.providerSpecificData,
+        };
+      }
     }
   }
-
   // ── 2. GitHub Copilot token expiry ────────────────────────────────────────
   if (provider === "github") {
     const copilotToken = creds.providerSpecificData?.copilotToken;

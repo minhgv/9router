@@ -87,3 +87,14 @@ export function getAdapterSync() {
   if (!state.instance) throw new Error("[DB] adapter not initialized — await getAdapter() first");
   return state.instance;
 }
+
+export function getDatabaseCapabilities(adapter = state.instance) {
+  const isNative = adapter ? !!adapter.isNative : false;
+  const supportsCrossProcessLease = adapter ? !!adapter.supportsCrossProcessLease : false;
+  const driver = adapter ? adapter.driver : "uninitialized";
+  return {
+    driver,
+    isNative,
+    supportsCrossProcessLease,
+  };
+}

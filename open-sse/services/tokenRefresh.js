@@ -49,8 +49,14 @@ export function isUnrecoverableRefreshError(result) {
     typeof result === "object" &&
     (result.error === "unrecoverable_refresh_error" ||
       result.error === "refresh_token_reused" ||
+      result.error === "refresh_token_expired" ||
+      result.error === "refresh_token_invalidated" ||
       result.error === "invalid_request" ||
-      result.error === "invalid_grant")
+      result.error === "invalid_grant" ||
+      result.code === "invalid_grant" ||
+      result.code === "refresh_token_expired" ||
+      result.code === "refresh_token_reused" ||
+      result.code === "refresh_token_invalidated")
   );
 }
 

@@ -111,10 +111,20 @@ export async function refreshAccessToken(provider, refreshToken, credentials, lo
 
     if (!response.ok) {
       const errorText = await response.text();
+      const classified = classifyOAuthRefreshError(errorText, response.status);
       log?.error?.("TOKEN_REFRESH", `Failed to refresh token for ${provider}`, {
         status: response.status,
         error: errorText,
+        permanent: classified.permanent,
       });
+      if (classified.permanent) {
+        return {
+          error: "unrecoverable_refresh_error",
+          code: classified.code || "invalid_grant",
+          description: classified.description,
+          status: response.status,
+        };
+      }
       return null;
     }
 
@@ -219,7 +229,20 @@ export async function refreshGoogleToken(refreshToken, clientId, clientSecret, l
 
     if (!response.ok) {
       const errorText = await response.text();
-      log?.error?.("TOKEN_REFRESH", "Failed to refresh Google token", { status: response.status, error: errorText });
+      const classified = classifyOAuthRefreshError(errorText, response.status);
+      log?.error?.("TOKEN_REFRESH", "Failed to refresh Google token", {
+        status: response.status,
+        error: errorText,
+        permanent: classified.permanent,
+      });
+      if (classified.permanent) {
+        return {
+          error: "unrecoverable_refresh_error",
+          code: classified.code || "invalid_grant",
+          description: classified.description,
+          status: response.status,
+        };
+      }
       return null;
     }
 

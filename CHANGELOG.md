@@ -9,6 +9,10 @@
 - **Usage**: usage-summary API masks API keys consistently with the repo layer (`usageRepo.js` masked-key contract)
 - **Tests**: +19 behavioral hermetic test files across the six provider groups (SEC-01..06, CODEX-01..06, AG-01..04, MIMO-01..06, ANT-01..05, GLM-01..04, DEV-01..04); obsolete URL-fallback assertions removed from codex-image-fetch tests (ratified supersession)
 
+- **Anthropic OAuth**: gate 1M-context beta by credential type, remove fabricated billing/identity metadata and default decoy tools, and retain only reversible client-tool mapping.
+- **Anthropic OAuth**: add native-SQLite refresh lease/fencing/CAS with stale-error protection; explicitly expose the sql.js single-process limitation.
+- **Anthropic fallback**: parse bounded Retry-After/reset hints, preserve model/account locks, separate auth/quota/overload/malformed/usage/restriction errors, and keep usage failures isolated from inference.
+
 ## Features
 - **Devin**: re-add Devin (Cognition) as a native provider — Connect/protobuf executor against the Cascade backend (`server.codeium.com`) with per-message SSE streaming, tool calls, thinking deltas, usage/credit accounting and context-overflow classification; new SWE model lineup (SWE-2 High/Medium/Max, SWE-1.7 + Medium/Lightning, SWE-check; SWE-1.6 kept as legacy) with metered pricing from the official model docs
 - **Devin**: OAuth (PKCE) login mirroring devin-cli — browser authorize at `app.devin.ai/auth/cli/continue` with loopback callback `127.0.0.1:59653/callback`, JSON code exchange at `api.devin.ai/auth/cli/token`; the returned session token (`devin-session-token$…`) is stored as a non-expiring credential (no refresh endpoint — re-login on expiry)

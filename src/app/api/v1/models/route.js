@@ -66,7 +66,6 @@ const LIVE_MODEL_RESOLVERS = {
         await updateProviderCredentials(conn.id, {
           copilotToken: refreshed.copilotToken,
           copilotTokenExpiresAt: refreshed.copilotTokenExpiresAt,
-          existingProviderSpecificData: conn.providerSpecificData || {},
         });
       },
     });
@@ -103,7 +102,6 @@ const LIVE_MODEL_RESOLVERS = {
       onCredentialsRefreshed: async (refreshed) => {
         await updateProviderCredentials(conn.id, {
           ...refreshed,
-          existingProviderSpecificData: conn.providerSpecificData || {},
         });
       },
     });

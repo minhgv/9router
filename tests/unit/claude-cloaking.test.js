@@ -7,13 +7,8 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { applyCloaking, cloakClaudeTools, decloakStreamChunk } from "../../open-sse/utils/claudeCloaking.js";
+import { cloakClaudeTools, decloakStreamChunk } from "../../open-sse/utils/claudeCloaking.js";
 import { CLAUDE_TOOL_SUFFIX } from "../../open-sse/config/appConstants.js";
-
-it("advertises a Claude Code version accepted by Fable 5.1", () => {
-  const body = applyCloaking({ messages: [] }, "sk-ant-oat-test", "session-id");
-  expect(body.system[0].text).toMatch(/^x-anthropic-billing-header: cc_version=2.1.258\./);
-});
 
 describe("cloakClaudeTools", () => {
   const baseBody = {
@@ -21,13 +16,13 @@ describe("cloakClaudeTools", () => {
     messages: [{ role: "user", content: [{ type: "text", text: "add a todo" }] }]
   };
 
-  it("suffixes client tool names and maps them back", () => {
+  it("suffixes client tool names and maps them back without injecting decoy tools", () => {
     const { body, toolNameMap } = cloakClaudeTools(baseBody);
     const suffixed = `todo_write${CLAUDE_TOOL_SUFFIX}`;
+    expect(body.tools.length).toBe(1);
     expect(body.tools.find(t => t.name === suffixed)).toBeDefined();
     expect(toolNameMap.get(suffixed)).toBe("todo_write");
   });
-
   it("suffixes a forced tool_choice to match the renamed tool", () => {
     const { body } = cloakClaudeTools({
       ...baseBody,
@@ -56,10 +51,15 @@ describe("cloakClaudeTools", () => {
     expect(none.body.tool_choice).toBeUndefined();
   });
 
-  it("does not suffix a forced choice that targets a non-client (decoy/built-in) tool", () => {
-    // "Bash" is an injected decoy sent unsuffixed; forcing it must stay as-is.
-    const { body } = cloakClaudeTools({ ...baseBody, tool_choice: { type: "tool", name: "Bash" } });
-    expect(body.tool_choice).toEqual({ type: "tool", name: "Bash" });
+  it("does not suffix a forced choice that targets a non-client (built-in) tool", () => {
+    const { body } = cloakClaudeTools({
+      tools: [
+        ...baseBody.tools,
+        { name: "web_search_20250305", type: "web_search_20250305" }
+      ],
+      tool_choice: { type: "tool", name: "web_search_20250305" }
+    });
+    expect(body.tool_choice).toEqual({ type: "tool", name: "web_search_20250305" });
   });
 
   it("renames tool_use names in message history", () => {
@@ -102,8 +102,8 @@ describe("decloakStreamChunk", () => {
     expect(chunk.content_block.name).toBe("run_code" + CLAUDE_TOOL_SUFFIX);
   });
 
-  it("passes through names the map does not know (e.g. decoy tools)", () => {
-    const chunk = toolUseStart("Bash");
+  it("passes through names the map does not know", () => {
+    const chunk = toolUseStart("other_tool");
     expect(decloakStreamChunk(chunk, toolNameMap)).toBe(chunk);
   });
 

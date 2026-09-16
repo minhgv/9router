@@ -133,11 +133,11 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
     result = prepareClaudeRequest(result, provider, apiKey, connectionId, credentials?.rawHeaders, clientSessionId);
   }
 
-  // Claude cloaking: rename client tools with CLAUDE_TOOL_SUFFIX (anti-ban)
+  // Claude tool mapping: map client tools with CLAUDE_TOOL_SUFFIX
   // quirk: only providers flagged cloakToolsOnOAuth, and only with an OAuth token
   if (PROVIDERS[provider]?.quirks?.cloakToolsOnOAuth) {
-    const apiKey = credentials?.accessToken || credentials?.apiKey || null;
-    if (apiKey?.includes("sk-ant-oat")) {
+    const isOAuth = credentials?.authType === "oauth" || (!credentials?.authType && !credentials?.apiKey && Boolean(credentials?.accessToken)) || (!credentials?.authType && (credentials?.accessToken || credentials?.apiKey)?.includes("sk-ant-oat"));
+    if (isOAuth) {
       const { body: cloakedBody, toolNameMap } = cloakClaudeTools(result);
       result = cloakedBody;
       if (toolNameMap?.size > 0) {

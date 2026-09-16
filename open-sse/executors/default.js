@@ -1,6 +1,6 @@
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS, PROVIDER_OAUTH } from "../config/providers.js";
-import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE, selectAnthropicBeta } from "../providers/shared.js";
+import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE, selectAnthropicBeta, ANTHROPIC_1M_BETA } from "../providers/shared.js";
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
 import { OAUTH_ENDPOINTS, buildKimiHeaders } from "../config/appConstants.js";
 import { buildClineHeaders } from "../shared/clineAuth.js";
@@ -24,16 +24,52 @@ function setAuth(headers, spec, token) {
 
 // Resolve auth onto headers from a descriptor.
 function applyAuth(headers, desc, credentials) {
+  if (credentials?.authType === "oauth") {
+    if (!desc.oauth && !desc.combined) {
+      throw new Error("Provider does not support OAuth authentication");
+    }
+    if (!credentials.accessToken) {
+      throw new Error("OAuth authentication requires accessToken");
+    }
+    setAuth(headers, desc.oauth || desc, credentials.accessToken);
+    if (desc.anthropicVersion && !headers["anthropic-version"] && !headers["Anthropic-Version"]) {
+      headers["anthropic-version"] = ANTHROPIC_API_VERSION;
+    }
+    return;
+  }
+
+  if (credentials?.authType === "apikey") {
+    if (!desc.apiKey && !desc.combined) {
+      throw new Error("Provider does not support API key authentication");
+    }
+    if (!credentials.apiKey) {
+      throw new Error("API key authentication requires apiKey");
+    }
+    setAuth(headers, desc.apiKey || desc, credentials.apiKey);
+    if (desc.anthropicVersion && !headers["anthropic-version"] && !headers["Anthropic-Version"]) {
+      headers["anthropic-version"] = ANTHROPIC_API_VERSION;
+    }
+    return;
+  }
+
+  // Fallback when credentials.authType is not explicitly provided (legacy / test callers)
   if (desc.combined) {
     // combined providers always set the header (legacy behavior, incl. noAuth → "Bearer undefined")
-    setAuth(headers, desc, credentials.apiKey || credentials.accessToken);
-    if (desc.anthropicVersion && !headers["anthropic-version"]) headers["anthropic-version"] = ANTHROPIC_API_VERSION;
+    setAuth(headers, desc, credentials?.apiKey || credentials?.accessToken);
+    if (desc.anthropicVersion && !headers["anthropic-version"] && !headers["Anthropic-Version"]) {
+      headers["anthropic-version"] = ANTHROPIC_API_VERSION;
+    }
     return;
   }
   // split apiKey/oauth: set only the matching branch (legacy: anthropic-compatible skips when both absent)
-  if (credentials.apiKey) setAuth(headers, desc.apiKey, credentials.apiKey);
-  else if (credentials.accessToken) setAuth(headers, desc.oauth, credentials.accessToken);
-  if (desc.anthropicVersion && !headers["anthropic-version"]) headers["anthropic-version"] = ANTHROPIC_API_VERSION;
+  if (credentials?.apiKey && desc.apiKey) {
+    setAuth(headers, desc.apiKey, credentials.apiKey);
+  } else if (credentials?.accessToken && desc.oauth) {
+    setAuth(headers, desc.oauth, credentials.accessToken);
+  }
+  if (desc.anthropicVersion && !headers["anthropic-version"] && !headers["Anthropic-Version"]) {
+    headers["anthropic-version"] = ANTHROPIC_API_VERSION;
+  }
 }
 
 // Provider-specific header quirks kept as small hooks (not pure auth).
@@ -164,9 +200,30 @@ export class DefaultExecutor extends BaseExecutor {
     // a node fronting Kimi or GLM answers on its own ids and never matches, so
     // gateways that would choke on unknown beta flags are left untouched.
     const isClaudeModel = typeof model === "string" && /^claude-/.test(model);
-    if (model && (this.provider === "claude"
-      || (this.provider?.startsWith?.("anthropic-compatible-") && isClaudeModel))) {
+    const isOfficialClaude = this.provider === "claude";
+    const isClaudeCompatible = this.provider?.startsWith?.("anthropic-compatible-") && isClaudeModel;
+    const isOAuth = credentials?.authType === "oauth" || (!credentials?.authType && !credentials?.apiKey && Boolean(credentials?.accessToken));
+
+    if (model && (isOfficialClaude || isClaudeCompatible)) {
       headers["Anthropic-Beta"] = selectAnthropicBeta(model);
+    }
+
+    // Strip 1M-context beta for official Claude OAuth requests (including any caller overrides)
+    if (isOfficialClaude && isOAuth) {
+      for (const betaKey of ["Anthropic-Beta", "anthropic-beta"]) {
+        if (headers[betaKey]) {
+          const filtered = headers[betaKey]
+            .split(",")
+            .map(s => s.trim())
+            .filter(f => f && f !== ANTHROPIC_1M_BETA)
+            .join(",");
+          if (filtered) {
+            headers[betaKey] = filtered;
+          } else {
+            delete headers[betaKey];
+          }
+        }
+      }
     }
 
     // Strip first-party Claude Code identity headers for non-Anthropic anthropic-compatible upstreams

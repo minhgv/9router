@@ -61,6 +61,8 @@ const ANTHROPIC_BETA_BASE = [
 ];
 const ANTHROPIC_BETA_HEAVY_AGENT = ["advanced-tool-use-2025-11-20", "effort-2025-11-24"];
 
+export const ANTHROPIC_1M_BETA = "context-1m-2025-08-07";
+
 // Heavy-agent beta flags are gated to opus/sonnet — cheaper models don't need them.
 export function selectAnthropicBeta(model = "") {
   const flags = [...ANTHROPIC_BETA_BASE];

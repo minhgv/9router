@@ -8,6 +8,7 @@ const OPTIONAL_FIELDS = [
   "scope", "projectId", "apiKey", "testStatus",
   "lastTested", "lastError", "lastErrorAt", "rateLimitedUntil", "expiresIn", "errorCode",
   "consecutiveUseCount", "idToken", "lastRefreshAt",
+  "credentialGeneration", "refreshLeaseOwner", "refreshLeaseExpiresAt", "refreshLeaseGeneration",
 ];
 
 const MODEL_LOCK_PREFIX = "modelLock_";
@@ -50,7 +51,7 @@ function rowToConn(row) {
 }
 
 function connToRow(c) {
-  const { id, provider, authType, name, email, priority, isActive, createdAt, updatedAt, ...rest } = c;
+  const { id, provider, authType, name, email, priority, isActive, createdAt, updatedAt, existingProviderSpecificData, ...rest } = c;
   return {
     id,
     provider,
@@ -170,7 +171,16 @@ export async function createProviderConnection(data) {
 
     if (existing) {
       const normalized = resetHealthStateOnActivation(existing, data);
-      const merged = { ...existing, ...normalized, updatedAt: now };
+      const nextGen = (existing.credentialGeneration || 1) + 1;
+      const merged = {
+        ...existing,
+        ...normalized,
+        credentialGeneration: nextGen,
+        refreshLeaseOwner: null,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseGeneration: null,
+        updatedAt: now,
+      };
       upsert(db, merged);
       result = merged;
       return;
@@ -192,6 +202,10 @@ export async function createProviderConnection(data) {
       name: connectionName,
       priority: connectionPriority,
       isActive: data.isActive !== undefined ? data.isActive : true,
+      credentialGeneration: data.credentialGeneration || 1,
+      refreshLeaseOwner: null,
+      refreshLeaseExpiresAt: null,
+      refreshLeaseGeneration: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -211,7 +225,7 @@ export async function createProviderConnection(data) {
   return result;
 }
 
-// Critical: OAuth refresh token race — atomic merge inside transaction
+// Critical: OAuth refresh token race — atomic merge inside transaction with CAS check
 export async function updateProviderConnection(id, data) {
   const db = await getAdapter();
   let result;
@@ -219,12 +233,277 @@ export async function updateProviderConnection(id, data) {
     const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
     if (!row) { result = null; return; }
     const existing = rowToConn(row);
-    const normalized = resetHealthStateOnActivation(existing, data);
+    const currentGen = existing.credentialGeneration || 1;
+
+    // CAS check: if caller provided expectedGeneration, reject on mismatch
+    if (data.expectedGeneration !== undefined && data.expectedGeneration !== null) {
+      if (currentGen !== data.expectedGeneration) {
+        result = null;
+        return;
+      }
+    }
+
+    const { existingProviderSpecificData, ...cleanData } = data || {};
+    if (cleanData.providerSpecificData || cleanData.copilotToken || cleanData.copilotTokenExpiresAt) {
+      cleanData.providerSpecificData = {
+        ...(existing.providerSpecificData || {}),
+        ...(cleanData.providerSpecificData || {}),
+        ...(cleanData.copilotToken ? { copilotToken: cleanData.copilotToken } : {}),
+        ...(cleanData.copilotTokenExpiresAt ? { copilotTokenExpiresAt: cleanData.copilotTokenExpiresAt } : {}),
+      };
+    }
+    const normalized = resetHealthStateOnActivation(existing, cleanData);
     const merged = { ...existing, ...normalized, updatedAt: new Date().toISOString() };
+    if (data.credentialGeneration !== undefined) {
+      merged.credentialGeneration = data.credentialGeneration;
+    } else if (
+      data.accessToken !== undefined ||
+      data.refreshToken !== undefined ||
+      data.apiKey !== undefined ||
+      data.idToken !== undefined
+    ) {
+      merged.credentialGeneration = currentGen + 1;
+    } else {
+      merged.credentialGeneration = currentGen;
+    }
+
     upsert(db, merged);
     if (data.priority !== undefined) reorderInTx(db, existing.provider);
     result = merged;
   });
+  return result;
+}
+
+export async function acquireRefreshLease(id, options = {}) {
+  const db = await getAdapter();
+  const supportsCrossProcessLease = db.supportsCrossProcessLease ?? false;
+  const { expectedGeneration, ownerId = uuidv4(), leaseTtlMs = 30000 } = options;
+  let result;
+
+  db.transaction(() => {
+    const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
+    if (!row) {
+      result = { success: false, reason: "not_found", supportsCrossProcessLease };
+      return;
+    }
+    const conn = rowToConn(row);
+    const currentGen = conn.credentialGeneration || 1;
+
+    if (expectedGeneration !== undefined && expectedGeneration !== null && currentGen !== expectedGeneration) {
+      result = {
+        success: false,
+        reason: "generation_mismatch",
+        currentGeneration: currentGen,
+        connection: conn,
+        supportsCrossProcessLease,
+      };
+      return;
+    }
+
+    const now = Date.now();
+    const leaseExpiresAtMs = conn.refreshLeaseExpiresAt ? new Date(conn.refreshLeaseExpiresAt).getTime() : 0;
+    const isLeaseActive = conn.refreshLeaseOwner && leaseExpiresAtMs > now;
+
+    if (isLeaseActive && conn.refreshLeaseOwner !== ownerId) {
+      result = {
+        success: false,
+        reason: "lease_held",
+        leaseOwner: conn.refreshLeaseOwner,
+        leaseExpiresAt: conn.refreshLeaseExpiresAt,
+        currentGeneration: currentGen,
+        connection: conn,
+        supportsCrossProcessLease,
+      };
+      return;
+    }
+
+    const leaseExpiresAt = new Date(now + leaseTtlMs).toISOString();
+    const updated = {
+      ...conn,
+      refreshLeaseOwner: ownerId,
+      refreshLeaseExpiresAt: leaseExpiresAt,
+      refreshLeaseGeneration: currentGen,
+      credentialGeneration: currentGen,
+      updatedAt: new Date(now).toISOString(),
+    };
+    upsert(db, updated);
+    result = {
+      success: true,
+      leaseOwner: ownerId,
+      leaseExpiresAt,
+      credentialGeneration: currentGen,
+      connection: updated,
+      supportsCrossProcessLease,
+    };
+  });
+
+  return result;
+}
+
+export async function commitRefreshedCredentials(id, { leaseOwner, expectedGeneration, newCredentials, nextGeneration } = {}) {
+  const db = await getAdapter();
+  let result;
+
+  db.transaction(() => {
+    const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
+    if (!row) {
+      result = { success: false, reason: "not_found" };
+      return;
+    }
+    const conn = rowToConn(row);
+    const currentGen = conn.credentialGeneration || 1;
+
+    // CAS check: generation must match expected
+    if (expectedGeneration !== undefined && expectedGeneration !== null && currentGen !== expectedGeneration) {
+      result = {
+        success: false,
+        reason: "cas_conflict",
+        currentGeneration: currentGen,
+        connection: conn,
+      };
+      return;
+    }
+
+    const now = Date.now();
+    const leaseExpiresAtMs = conn.refreshLeaseExpiresAt ? new Date(conn.refreshLeaseExpiresAt).getTime() : 0;
+    if (conn.refreshLeaseOwner && leaseOwner && conn.refreshLeaseOwner !== leaseOwner && leaseExpiresAtMs > now) {
+      result = {
+        success: false,
+        reason: "lease_owner_mismatch",
+        currentGeneration: currentGen,
+        connection: conn,
+      };
+      return;
+    }
+
+    const nextGen = nextGeneration || (currentGen + 1);
+    const { existingProviderSpecificData, ...cleanCreds } = newCredentials || {};
+    const mergedProviderSpecificData = {
+      ...(conn.providerSpecificData || {}),
+      ...(cleanCreds.providerSpecificData || {}),
+      ...(cleanCreds.copilotToken ? { copilotToken: cleanCreds.copilotToken } : {}),
+      ...(cleanCreds.copilotTokenExpiresAt ? { copilotTokenExpiresAt: cleanCreds.copilotTokenExpiresAt } : {}),
+    };
+    if (Object.keys(mergedProviderSpecificData).length > 0) {
+      cleanCreds.providerSpecificData = mergedProviderSpecificData;
+    }
+    const normalized = resetHealthStateOnActivation(conn, cleanCreds);
+    const updated = {
+      ...conn,
+      ...normalized,
+      credentialGeneration: nextGen,
+      refreshLeaseOwner: null,
+      refreshLeaseExpiresAt: null,
+      refreshLeaseGeneration: null,
+      updatedAt: new Date(now).toISOString(),
+    };
+
+    if (updated.testStatus === "error" && (updated.errorCode === "invalid_grant" || updated.errorCode === "unrecoverable_refresh_error")) {
+      updated.testStatus = "active";
+      updated.lastError = null;
+      updated.errorCode = null;
+    }
+
+    upsert(db, updated);
+    result = {
+      success: true,
+      credentialGeneration: nextGen,
+      connection: updated,
+    };
+  });
+
+  return result;
+}
+
+export async function releaseRefreshLease(id, { leaseOwner } = {}) {
+  const db = await getAdapter();
+  let result;
+
+  db.transaction(() => {
+    const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
+    if (!row) {
+      result = { success: false, reason: "not_found" };
+      return;
+    }
+    const conn = rowToConn(row);
+    if (!leaseOwner || conn.refreshLeaseOwner === leaseOwner) {
+      const updated = {
+        ...conn,
+        refreshLeaseOwner: null,
+        refreshLeaseExpiresAt: null,
+        refreshLeaseGeneration: null,
+        updatedAt: new Date().toISOString(),
+      };
+      upsert(db, updated);
+      result = { success: true };
+    } else {
+      result = { success: false, reason: "owner_mismatch" };
+    }
+  });
+
+  return result;
+}
+
+export async function failRefreshWithStaleProtection(id, { leaseOwner, expectedGeneration, error, errorCode, isPermanent } = {}) {
+  const db = await getAdapter();
+  let result;
+
+  db.transaction(() => {
+    const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
+    if (!row) {
+      result = { success: false, reason: "not_found" };
+      return;
+    }
+    const conn = rowToConn(row);
+    const currentGen = conn.credentialGeneration || 1;
+
+    // If expectedGeneration does not match currentGen, this is a stale error!
+    if (expectedGeneration !== undefined && expectedGeneration !== null && currentGen !== expectedGeneration) {
+      if (conn.refreshLeaseOwner === leaseOwner) {
+        const updated = {
+          ...conn,
+          refreshLeaseOwner: null,
+          refreshLeaseExpiresAt: null,
+          refreshLeaseGeneration: null,
+          updatedAt: new Date().toISOString(),
+        };
+        upsert(db, updated);
+      }
+      result = {
+        success: false,
+        reason: "stale_error_ignored",
+        currentGeneration: currentGen,
+        connection: conn,
+      };
+      return;
+    }
+
+    // Generation matches: record failure and release lease
+    const nowIso = new Date().toISOString();
+    const updated = {
+      ...conn,
+      refreshLeaseOwner: conn.refreshLeaseOwner === leaseOwner ? null : conn.refreshLeaseOwner,
+      refreshLeaseExpiresAt: conn.refreshLeaseOwner === leaseOwner ? null : conn.refreshLeaseExpiresAt,
+      refreshLeaseGeneration: conn.refreshLeaseOwner === leaseOwner ? null : conn.refreshLeaseGeneration,
+      updatedAt: nowIso,
+    };
+
+    if (isPermanent) {
+      updated.testStatus = "error";
+      updated.lastError = error || "OAuth refresh token invalid or revoked (re-authentication required)";
+      updated.lastErrorAt = nowIso;
+      updated.errorCode = errorCode || "invalid_grant";
+    }
+
+    upsert(db, updated);
+    result = {
+      success: true,
+      markedInvalid: !!isPermanent,
+      credentialGeneration: currentGen,
+      connection: updated,
+    };
+  });
+
   return result;
 }
 

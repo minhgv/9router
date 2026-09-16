@@ -47,33 +47,135 @@ const COOLDOWN = {
   short: 5 * 1000,
 };
 
+export const ERROR_CATEGORIES = {
+  AUTH_INVALID: "auth_invalid",
+  QUOTA: "quota",
+  OVERLOAD: "overload",
+  MALFORMED_REQUEST: "malformed_request",
+  USAGE_FAILURE: "usage_failure",
+  PROVIDER_RESTRICTION: "provider_restriction",
+  TRANSIENT: "transient",
+};
+
 /**
  * Unified error classification rules.
  * Checked top-to-bottom: text rules first (by order), then status rules.
- * Each rule: { text?, status?, cooldownMs?, backoff? }
+ * Each rule: { text?, status?, category?, shouldFallback?, cooldownMs?, backoff? }
  *   - text: substring match (case-insensitive) on error message
  *   - status: HTTP status code match
+ *   - category: one of ERROR_CATEGORIES
+ *   - shouldFallback: boolean (default true)
  *   - cooldownMs: fixed cooldown duration
- *   - backoff: true = use exponential backoff (rate limit)
+ *   - backoff: true = use exponential backoff (rate limit / quota)
  */
 export const ERROR_RULES = [
   // --- Text-based rules (checked first, order = priority) ---
-  { text: "no credentials",           cooldownMs: COOLDOWN.long },
-  { text: "request not allowed",      cooldownMs: COOLDOWN.short },
-  { text: "improperly formed request", cooldownMs: COOLDOWN.long },
-  { text: "rate limit",               backoff: true },
-  { text: "too many requests",        backoff: true },
-  { text: "quota exceeded",           backoff: true },
-  { text: "capacity",                 backoff: true },
-  { text: "overloaded",               backoff: true },
+  // Usage failure (must not disable inference)
+  { text: "unable to fetch usage",     category: ERROR_CATEGORIES.USAGE_FAILURE, shouldFallback: false, cooldownMs: 0 },
+  { text: "usage details require",     category: ERROR_CATEGORIES.USAGE_FAILURE, shouldFallback: false, cooldownMs: 0 },
+  { text: "usage api requires",        category: ERROR_CATEGORIES.USAGE_FAILURE, shouldFallback: false, cooldownMs: 0 },
+  { text: "failed to fetch usage",     category: ERROR_CATEGORIES.USAGE_FAILURE, shouldFallback: false, cooldownMs: 0 },
+
+  // Auth invalid (account needs re-auth or switch)
+  { text: "no credentials",           category: ERROR_CATEGORIES.AUTH_INVALID, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "invalid_api_key",          category: ERROR_CATEGORIES.AUTH_INVALID, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "invalid api key",          category: ERROR_CATEGORIES.AUTH_INVALID, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "invalid x-api-key",        category: ERROR_CATEGORIES.AUTH_INVALID, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "authentication_error",     category: ERROR_CATEGORIES.AUTH_INVALID, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "invalid_token",            category: ERROR_CATEGORIES.AUTH_INVALID, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "token expired",            category: ERROR_CATEGORIES.AUTH_INVALID, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "token has been revoked",   category: ERROR_CATEGORIES.AUTH_INVALID, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "account suspended",        category: ERROR_CATEGORIES.AUTH_INVALID, shouldFallback: true, cooldownMs: COOLDOWN.long },
+
+  // Provider restrictions
+  { text: "request not allowed",      category: ERROR_CATEGORIES.PROVIDER_RESTRICTION, shouldFallback: true, cooldownMs: COOLDOWN.short },
+  { text: "permission_denied",        category: ERROR_CATEGORIES.PROVIDER_RESTRICTION, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "permission_error",         category: ERROR_CATEGORIES.PROVIDER_RESTRICTION, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "organization_restricted",   category: ERROR_CATEGORIES.PROVIDER_RESTRICTION, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "geoblocked",               category: ERROR_CATEGORIES.PROVIDER_RESTRICTION, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "country not supported",    category: ERROR_CATEGORIES.PROVIDER_RESTRICTION, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "region not supported",     category: ERROR_CATEGORIES.PROVIDER_RESTRICTION, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { text: "provider_restricted",      category: ERROR_CATEGORIES.PROVIDER_RESTRICTION, shouldFallback: true, cooldownMs: COOLDOWN.long },
+
+  // Malformed / client request errors (client should fix; switching accounts won't help)
+  { text: "improperly formed request", category: ERROR_CATEGORIES.MALFORMED_REQUEST, shouldFallback: false, cooldownMs: 0 },
+  { text: "invalid_request_error",     category: ERROR_CATEGORIES.MALFORMED_REQUEST, shouldFallback: false, cooldownMs: 0 },
+  { text: "bad_request",              category: ERROR_CATEGORIES.MALFORMED_REQUEST, shouldFallback: false, cooldownMs: 0 },
+  { text: "context length exceeded",   category: ERROR_CATEGORIES.MALFORMED_REQUEST, shouldFallback: false, cooldownMs: 0 },
+  { text: "prompt too long",          category: ERROR_CATEGORIES.MALFORMED_REQUEST, shouldFallback: false, cooldownMs: 0 },
+  { text: "max_tokens too large",     category: ERROR_CATEGORIES.MALFORMED_REQUEST, shouldFallback: false, cooldownMs: 0 },
+
+  // Quota & billing errors (switch account or wait for reset)
+  { text: "quota exceeded",           category: ERROR_CATEGORIES.QUOTA, shouldFallback: true, backoff: true },
+  { text: "insufficient_quota",       category: ERROR_CATEGORIES.QUOTA, shouldFallback: true, backoff: true },
+  { text: "credit balance",           category: ERROR_CATEGORIES.QUOTA, shouldFallback: true, backoff: true },
+  { text: "usage limit reached",      category: ERROR_CATEGORIES.QUOTA, shouldFallback: true, backoff: true },
+  { text: "usage limit exceeded",     category: ERROR_CATEGORIES.QUOTA, shouldFallback: true, backoff: true },
+  { text: "billing_error",            category: ERROR_CATEGORIES.QUOTA, shouldFallback: true, backoff: true },
+
+  // Overload & rate limit errors
+  { text: "rate limit",               category: ERROR_CATEGORIES.OVERLOAD, shouldFallback: true, backoff: true },
+  { text: "too many requests",        category: ERROR_CATEGORIES.OVERLOAD, shouldFallback: true, backoff: true },
+  { text: "capacity",                 category: ERROR_CATEGORIES.OVERLOAD, shouldFallback: true, backoff: true },
+  { text: "overloaded",               category: ERROR_CATEGORIES.OVERLOAD, shouldFallback: true, backoff: true },
+  { text: "overloaded_error",         category: ERROR_CATEGORIES.OVERLOAD, shouldFallback: true, backoff: true },
+  { text: "resource exhausted",       category: ERROR_CATEGORIES.OVERLOAD, shouldFallback: true, backoff: true },
 
   // --- Status-based rules (fallback when text doesn't match) ---
-  { status: 401, cooldownMs: COOLDOWN.long },
-  { status: 402, cooldownMs: COOLDOWN.long },
-  { status: 403, cooldownMs: COOLDOWN.long },
-  { status: 404, cooldownMs: COOLDOWN.long },
-  { status: 429, backoff: true },
+  { status: 400, category: ERROR_CATEGORIES.MALFORMED_REQUEST, shouldFallback: false, cooldownMs: 0 },
+  { status: 401, category: ERROR_CATEGORIES.AUTH_INVALID, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { status: 402, category: ERROR_CATEGORIES.QUOTA, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { status: 403, category: ERROR_CATEGORIES.PROVIDER_RESTRICTION, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { status: 404, category: ERROR_CATEGORIES.PROVIDER_RESTRICTION, shouldFallback: true, cooldownMs: COOLDOWN.long },
+  { status: 406, category: ERROR_CATEGORIES.MALFORMED_REQUEST, shouldFallback: false, cooldownMs: 0 },
+  { status: 422, category: ERROR_CATEGORIES.MALFORMED_REQUEST, shouldFallback: false, cooldownMs: 0 },
+  { status: 429, category: ERROR_CATEGORIES.OVERLOAD, shouldFallback: true, backoff: true },
+  { status: 529, category: ERROR_CATEGORIES.OVERLOAD, shouldFallback: true, backoff: true },
+  { status: 500, category: ERROR_CATEGORIES.TRANSIENT, shouldFallback: true, cooldownMs: TRANSIENT_COOLDOWN_MS },
+  { status: 502, category: ERROR_CATEGORIES.TRANSIENT, shouldFallback: true, cooldownMs: TRANSIENT_COOLDOWN_MS },
+  { status: 503, category: ERROR_CATEGORIES.TRANSIENT, shouldFallback: true, cooldownMs: TRANSIENT_COOLDOWN_MS },
+  { status: 504, category: ERROR_CATEGORIES.TRANSIENT, shouldFallback: true, cooldownMs: TRANSIENT_COOLDOWN_MS },
 ];
+
+/**
+ * Classify error into a canonical error category and fallback rules.
+ * @param {number} status - HTTP status code
+ * @param {string|object} errorText - Error message text
+ * @returns {{ category: string, shouldFallback: boolean, cooldownMs?: number, backoff?: boolean, rule?: object }}
+ */
+export function classifyError(status, errorText) {
+  const lowerError = errorText
+    ? (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase()
+    : "";
+
+  for (const rule of ERROR_RULES) {
+    if (rule.text && lowerError && lowerError.includes(rule.text)) {
+      return {
+        category: rule.category || ERROR_CATEGORIES.TRANSIENT,
+        shouldFallback: rule.shouldFallback !== undefined ? rule.shouldFallback : true,
+        cooldownMs: rule.cooldownMs,
+        backoff: !!rule.backoff,
+        rule
+      };
+    }
+    if (rule.status && rule.status === status) {
+      return {
+        category: rule.category || ERROR_CATEGORIES.TRANSIENT,
+        shouldFallback: rule.shouldFallback !== undefined ? rule.shouldFallback : true,
+        cooldownMs: rule.cooldownMs,
+        backoff: !!rule.backoff,
+        rule
+      };
+    }
+  }
+
+  return {
+    category: ERROR_CATEGORIES.TRANSIENT,
+    shouldFallback: true,
+    cooldownMs: TRANSIENT_COOLDOWN_MS,
+    backoff: false
+  };
+}
 
 // Backward compat: COOLDOWN_MS object (used by index.js re-export)
 export const COOLDOWN_MS = {
@@ -82,4 +184,7 @@ export const COOLDOWN_MS = {
   notFound: COOLDOWN.long,
   transient: TRANSIENT_COOLDOWN_MS,
   requestNotAllowed: COOLDOWN.short,
+  authInvalid: COOLDOWN.long,
+  quota: COOLDOWN.long,
+  providerRestriction: COOLDOWN.long,
 };

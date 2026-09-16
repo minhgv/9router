@@ -440,7 +440,6 @@ const PROVIDER_MODELS_CONFIG = {
         onCredentialsRefreshed: async (refreshed) => {
           await updateProviderCredentials(connection.id, {
             ...refreshed,
-            existingProviderSpecificData: connection.providerSpecificData || {},
           });
         },
       });

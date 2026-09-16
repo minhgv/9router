@@ -40,6 +40,8 @@ export function createBetterSqliteAdapter(filePath) {
 
   return {
     driver: "better-sqlite3",
+    isNative: true,
+    supportsCrossProcessLease: true,
     run(sql, params = []) { return prepare(sql).run(...params); },
     get(sql, params = []) { return prepare(sql).get(...params); },
     all(sql, params = []) { return prepare(sql).all(...params); },

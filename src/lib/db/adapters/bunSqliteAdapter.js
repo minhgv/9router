@@ -37,6 +37,8 @@ export async function createBunSqliteAdapter(filePath) {
 
   return {
     driver: "bun:sqlite",
+    isNative: true,
+    supportsCrossProcessLease: true,
     run(sql, params = []) {
       const r = prepare(sql).run(...params);
       return { changes: Number(r.changes ?? 0), lastInsertRowid: Number(r.lastInsertRowid ?? 0) };

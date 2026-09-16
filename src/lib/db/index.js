@@ -1,5 +1,6 @@
 // Public API barrel — all DB functions
-import { getAdapter } from "./driver.js";
+import { getAdapter, getDatabaseCapabilities } from "./driver.js";
+export { getDatabaseCapabilities };
 import { stringifyJson, parseJson } from "./helpers/jsonCol.js";
 
 // Settings
@@ -13,6 +14,8 @@ export {
   createProviderConnection, updateProviderConnection,
   deleteProviderConnection, deleteProviderConnectionsByProvider,
   reorderProviderConnections, cleanupProviderConnections,
+  acquireRefreshLease, commitRefreshedCredentials,
+  releaseRefreshLease, failRefreshWithStaleProtection,
 } from "./repos/connectionsRepo.js";
 
 // Provider nodes

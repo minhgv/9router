@@ -4,8 +4,8 @@
 
 **Connect All AI Code Tools (Claude Code, Cursor, Antigravity, Copilot, Codex, Gemini, OpenCode, Cline, OpenClaw...) to 40+ AI Providers & 100+ Models.**
 
-[![npm](https://img.shields.io/npm/v/9router.svg)](https://www.npmjs.com/package/9router)
-[![Downloads](https://img.shields.io/npm/dm/9router.svg)](https://www.npmjs.com/package/9router)
+[![npm](https://img.shields.io/npm/v/@m1nh/9router.svg)](https://www.npmjs.com/package/@m1nh/9router)
+[![Downloads](https://img.shields.io/npm/dm/@m1nh/9router.svg)](https://www.npmjs.com/package/@m1nh/9router)
 [![Docker Pulls](https://img.shields.io/docker/pulls/decolua/9router.svg?logo=docker&label=Docker%20pulls)](https://hub.docker.com/r/decolua/9router)
 [![GHCR](https://img.shields.io/badge/GHCR-decolua%2F9router-blue?logo=github)](https://github.com/decolua/9router/pkgs/container/9router)
 [![License](https://img.shields.io/npm/l/9router.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
@@ -40,11 +40,11 @@
 **Option 1 — npm (recommended for desktop):**
 
 ```bash
-npm install -g 9router
+npm install -g @m1nh/9router
 9router
 
 # Or run directly with npx
-npx 9router
+npx @m1nh/9router
 ```
 
 **Option 2 — Docker (server/VPS):**

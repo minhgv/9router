@@ -9,10 +9,8 @@
   
   [![npm](https://img.shields.io/npm/v/@m1nh/9router.svg)](https://www.npmjs.com/package/@m1nh/9router)
   [![Downloads](https://img.shields.io/npm/dm/@m1nh/9router.svg)](https://www.npmjs.com/package/@m1nh/9router)
-  [![Docker Pulls](https://img.shields.io/docker/pulls/decolua/9router.svg?logo=docker&label=Docker%20pulls)](https://hub.docker.com/r/decolua/9router)
-  [![GHCR](https://img.shields.io/badge/GHCR-decolua%2F9router-blue?logo=github)](https://github.com/decolua/9router/pkgs/container/9router)
-  [![License](https://img.shields.io/npm/l/9router.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
-
+  [![GHCR](https://img.shields.io/badge/GHCR-minhgv%2F9router-blue?logo=github)](https://github.com/minhgv/9router/pkgs/container/9router)
+  [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/minhgv/9router/blob/main/LICENSE)
 <a href="https://trendshift.io/repositories/22628" target="_blank"><img src="https://trendshift.io/api/badge/repositories/22628" alt="decolua%2F9router | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
 
 [🚀 Quick Start](#-quick-start) • [💡 Features](#-key-features) • [📖 Setup](#-setup-guide) • [🌐 Website](https://9router.com)
@@ -1238,10 +1236,9 @@ pm2 startup
 
 ### Docker
 
-Published images (multi-platform `linux/amd64` + `linux/arm64`):
+Published image (multi-platform `linux/amd64` + `linux/arm64`):
 
-- Docker Hub: [`decolua/9router`](https://hub.docker.com/r/decolua/9router)
-- GHCR: [`ghcr.io/decolua/9router`](https://github.com/decolua/9router/pkgs/container/9router)
+- GHCR: [`ghcr.io/minhgv/9router`](https://github.com/minhgv/9router/pkgs/container/9router)
 
 **Quick start (use published image):**
 
@@ -1251,7 +1248,7 @@ docker run -d \
   -p 20128:20128 \
   -v "$HOME/.9router:/app/data" \
   -e DATA_DIR=/app/data \
-  decolua/9router:latest
+  ghcr.io/minhgv/9router:latest
 ```
 
 → Open http://localhost:20128
@@ -1259,7 +1256,7 @@ docker run -d \
 **Build from source (dev):**
 
 ```bash
-git clone https://github.com/decolua/9router.git
+git clone https://github.com/minhgv/9router.git
 cd 9router/app
 docker build -t 9router .
 docker run -d --name 9router -p 20128:20128 \
@@ -1277,7 +1274,7 @@ docker run -d --name 9router -p 20128:20128 \
 docker logs -f 9router
 docker restart 9router
 docker stop 9router && docker rm 9router
-docker pull decolua/9router:latest   # update to latest
+docker pull ghcr.io/minhgv/9router:latest   # update to latest
 ```
 
 **Data persistence:** `$HOME/.9router/db/data.sqlite` on host ↔ `/app/data/db/data.sqlite` in container.
@@ -1479,8 +1476,8 @@ Authorization: Bearer your-api-key
 ## 📧 Support
 
 - **Website**: [9router.com](https://9router.com)
-- **GitHub**: [github.com/decolua/9router](https://github.com/decolua/9router)
-- **Issues**: [github.com/decolua/9router/issues](https://github.com/decolua/9router/issues)
+- **GitHub**: [github.com/minhgv/9router](https://github.com/minhgv/9router)
+- **Issues**: [github.com/minhgv/9router/issues](https://github.com/minhgv/9router/issues)
 
 ---
 

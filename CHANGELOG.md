@@ -1,5 +1,8 @@
 # Unreleased
 
+## Features
+- **Usage**: add Cache Ratio column to the usage table (tokens view) — shows `cachedTokens / promptTokens` as a percentage per model/account/API key/endpoint, sortable via the column header
+
 ## Security
 - **Egress**: connection-proxy policy now reaches every credential-refresh and image-path egress — new shared helper `deriveConnectionProxyOptions(credentials)` (open-sse/utils/proxyFetch.js) wired into `refreshProviderCredentials`, `refreshTokenByProvider` (claude, codex, xai/grok-cli/gcli discovery+token POST, vertex/vertex-partner SA mint, generic `refreshAccessToken`), the codex/default/antigravity executors and the antigravity image adapter; explicitly supplied `proxyOptions` always wins, absent ones derive from the credential's connection settings (videoCore/chatCore call shapes covered by behavioral tests)
 - **Proxy validation**: strict mode rejects invalid proxy URLs (bad scheme, CR/LF, malformed host/port, javascript:, unsupported schemes); non-strict mode falls back to direct with a logged warning; `NO_PROXY` matches by exact host, domain suffix, CIDR or `*` and keeps direct egress even when a proxy is configured (`src/lib/network/proxyTest.js`, `outboundProxy.js`, proxy-pool route)

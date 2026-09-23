@@ -100,7 +100,8 @@ function sortData(dataMap, pendingMap = {}, sortBy, sortOrder) {
       const inputCost = totalTokens > 0 ? nonCachedInput * (totalCost / totalTokens) : 0;
       const cachedCost = totalTokens > 0 ? cachedTokens * (totalCost / totalTokens) : 0;
       const outputCost = totalTokens > 0 ? (data.completionTokens || 0) * (totalCost / totalTokens) : 0;
-      return { ...data, key, totalTokens, totalCost, inputCost, cachedCost, outputCost, pending: pendingMap[key] || 0 };
+      const cacheRatio = data.promptTokens > 0 ? cachedTokens / data.promptTokens : 0;
+      return { ...data, key, totalTokens, totalCost, inputCost, cachedCost, outputCost, cacheRatio, pending: pendingMap[key] || 0 };
     })
     .sort((a, b) => {
       let valA = a[sortBy];

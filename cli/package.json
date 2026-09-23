@@ -1,6 +1,6 @@
 {
   "name": "@m1nh/9router",
-  "version": "0.5.78",
+  "version": "0.5.79",
   "description": "9Router CLI - Start and manage 9Router server",
   "publishConfig": {
     "access": "public"

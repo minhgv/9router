@@ -1,4 +1,5 @@
 import pkg from "../../../package.json" with { type: "json" };
+import cliPkg from "../../../cli/package.json" with { type: "json" };
 
 // App configuration
 export const APP_CONFIG = {
@@ -15,9 +16,11 @@ export const GITHUB_CONFIG = {
 
 // Updater configuration
 export const UPDATER_CONFIG = {
-  npmPackageName: "9router",
-  installCmd: "npm i -g 9router",
-  installCmdLatest: "npm i -g 9router@latest --prefer-online",
+  // npm package name comes from cli/package.json — single source for the
+  // published artifact (@m1nh/9router), not the dashboard package (9router-app).
+  npmPackageName: cliPkg.name,
+  installCmd: `npm i -g ${cliPkg.name}`,
+  installCmdLatest: `npm i -g ${cliPkg.name}@latest --prefer-online`,
   shutdownCountdownSec: 3,
   exitDelayMs: 500,
   statusPort: 20129,

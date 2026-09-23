@@ -1,7 +1,8 @@
 import https from "https";
 import pkg from "../../../../package.json" with { type: "json" };
+import { UPDATER_CONFIG } from "@/shared/constants/config";
 
-const NPM_PACKAGE_NAME = "9router";
+const NPM_PACKAGE_NAME = UPDATER_CONFIG.npmPackageName;
 const VERSION_CACHE_TTL_MS = 3600000; // cache npm latest lookup for 1h
 
 // Survive hot reload; one cache per process

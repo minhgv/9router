@@ -54,11 +54,9 @@ export default {
     // OpenAI format, so supportedFormats pins them to the openai transport.
     { id: "mimo-x-pro-preview", name: "MiMo-X-Pro-Preview", upstreamModelId: "xiaomi/mimo-x-pro-preview", supportedFormats: ["openai"] },
     { id: "mimo-x-flash-preview", name: "MiMo-X-Flash-Preview", upstreamModelId: "xiaomi/mimo-x-flash-preview", supportedFormats: ["openai"] },
-    // Cloud API models (api.xiaomimimo.com/v1)
-    { id: "mimo-v2.5-pro", name: "MiMo V2.5 Pro" },
-    { id: "mimo-v2.5", name: "MiMo V2.5" },
-    { id: "mimo-v2-omni", name: "MiMo V2 Omni" },
-    { id: "mimo-v2-flash", name: "MiMo V2 Flash" },
+    // Cloud API models (api.xiaomimimo.com/v1) — MiMo V2.6 series
+    { id: "mimo-v2.6-pro", name: "MiMo V2.6 Pro" },
+    { id: "mimo-v2.6-flash", name: "MiMo V2.6 Flash" },
     { id: "mimo-v2.5-tts", name: "MiMo V2.5 TTS", kind: "tts" },
   ],
   ttsConfig: {

@@ -50,14 +50,11 @@ export default {
     },
   ],
   models: [
-    { id: "mimo-v2.5-pro", name: "MiMo V2.5 Pro" },
-    { id: "mimo-v2.5-pro-claude", name: "MiMo V2.5 Pro (Claude Native)", targetFormat: "claude", upstreamModelId: "mimo-v2.5-pro" },
-    { id: "mimo-v2.5", name: "MiMo V2.5" },
-    { id: "mimo-v2-pro", name: "MiMo V2 Pro" },
-    { id: "mimo-v2-omni", name: "MiMo V2 Omni" },
-    { id: "mimo-v2-tts", name: "MiMo V2 TTS" },
-    { id: "mimo-v2.5-tts", name: "MiMo V2.5 TTS" },
-    { id: "mimo-v2.5-tts-voiceclone", name: "MiMo V2.5 TTS Voice Clone" },
-    { id: "mimo-v2.5-tts-voicedesign", name: "MiMo V2.5 TTS Voice Design" },
+    // MiMo V2.6 series (released 2026-09-22) — 1M ctx, 128K out, omni-modal
+    // (text/image/video/audio in). v2.6-pro-ultraspeed is a custom-tier SKU
+    // with no public API, so it is intentionally not listed.
+    { id: "mimo-v2.6-pro", name: "MiMo V2.6 Pro" },
+    { id: "mimo-v2.6-pro-claude", name: "MiMo V2.6 Pro (Claude Native)", targetFormat: "claude", upstreamModelId: "mimo-v2.6-pro" },
+    { id: "mimo-v2.6-flash", name: "MiMo V2.6 Flash" },
   ],
 };

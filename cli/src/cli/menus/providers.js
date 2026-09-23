@@ -21,6 +21,9 @@ const PROVIDER_MODELS = {
     { id: "claude-haiku-4-5-20251001" },
   ],
   cx: [
+    { id: "gpt-6-sol" },
+    { id: "gpt-6-luna" },
+    { id: "gpt-6-astra" },
     { id: "gpt-5.2-codex" },
     { id: "gpt-5.2" },
     { id: "gpt-5.1-codex-max" },

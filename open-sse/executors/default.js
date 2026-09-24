@@ -182,7 +182,7 @@ export class DefaultExecutor extends BaseExecutor {
     return BEARER;
   }
 
-  buildHeaders(credentials, stream = true, url, model) {
+  buildHeaders(credentials, stream = true, url, model, body = null) {
     const rt = credentials?.runtimeTransport;
     const headers = { "Content-Type": "application/json", ...(rt ? rt.headers : this.config.headers) };
     const desc = rt?.auth || AUTH_DESCRIPTORS[this.provider] || this.resolveAuthDescriptor();
@@ -205,7 +205,7 @@ export class DefaultExecutor extends BaseExecutor {
     const isOAuth = credentials?.authType === "oauth" || (!credentials?.authType && !credentials?.apiKey && Boolean(credentials?.accessToken));
 
     if (model && (isOfficialClaude || isClaudeCompatible)) {
-      headers["Anthropic-Beta"] = selectAnthropicBeta(model);
+      headers["Anthropic-Beta"] = selectAnthropicBeta(model, body);
     }
 
     // Strip 1M-context beta for official Claude OAuth requests (including any caller overrides)

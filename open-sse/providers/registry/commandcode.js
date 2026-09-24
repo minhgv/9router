@@ -51,4 +51,8 @@ export default {
     { id: "stepfun/Step-3.5-Flash", name: "Step 3.5 Flash" },
     { id: "nvidia/nemotron-3-ultra-550b-a55b", name: "Nemotron 3 Ultra" },
   ],
+  features: {
+    usage: true,
+    usageApikey: true,
+  },
 };

@@ -159,7 +159,6 @@ export function checkFallbackError(status, errorText, backoffLevel = 0, options 
       category: classification.category
     };
   }
-
   // Request-scoped client errors that matched no rule above: a 400 caused by the
   // request itself (context overflow, malformed body, unsupported parameter) says
   // nothing about the credential, so cooling the account down only removes a

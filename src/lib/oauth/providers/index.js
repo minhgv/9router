@@ -12,6 +12,7 @@ import geminiCli from "./gemini-cli.js";
 import antigravity from "./antigravity.js";
 import iflow from "./iflow.js";
 import qoder from "./qoder.js";
+import qoderCn from "./qoder-cn.js";
 import github from "./github.js";
 import kiro from "./kiro.js";
 import cursor from "./cursor.js";
@@ -38,6 +39,7 @@ const PROVIDERS = {
   antigravity,
   iflow,
   qoder,
+  "qoder-cn": qoderCn,
   github,
   kiro,
   cursor,
@@ -114,6 +116,11 @@ export async function generateAuthData(providerName, redirectUri, meta) {
     flowType: provider.flowType,
     fixedPort: provider.fixedPort,
     callbackPath: provider.callbackPath || "/callback",
+    // Zed: surface the system_id embedded in the sign-in URL so the frontend
+    // can thread it through register-session → exchange → stored connection
+    // (exchangeTokens re-runs prepareConfig, which would otherwise mint a
+    // different one). Absent for every other provider — purely additive.
+    ...(config.systemId ? { systemId: config.systemId } : {}),
   };
 }
 

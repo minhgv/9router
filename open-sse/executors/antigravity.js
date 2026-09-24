@@ -292,7 +292,7 @@ export class AntigravityExecutor extends BaseExecutor {
       const modifiedParts = parts?.map(p => {
         if (!p.functionCall) return p;
         const callId = p.functionCall.id;
-        const cachedSig = callId ? getGeminiThoughtSignatureSync(callId, sessionId) : null;
+        const cachedSig = callId ? getGeminiThoughtSignatureSync(callId, sessionId, body.model || model) : null;
         const callSig = p.thoughtSignature || cachedSig || (!firstFunctionCallSeen ? DEFAULT_THINKING_AG_SIGNATURE : undefined);
         firstFunctionCallSeen = true;
         if (callSig) {
@@ -387,6 +387,9 @@ export class AntigravityExecutor extends BaseExecutor {
     // requests; the "agent" bucket is a rate-limited lane and trips bare 429s
     // (RESOURCE_EXHAUSTED without ErrorInfo). Keep the label internal for
     // trajectory seeding only. (Parity with antigravity-opencode envelope.ts.)
+    // Also strip any `requestType` leaked through from an upstream envelope via
+    // the ...body spread below — `image_gen`/`search` lanes keep their own.
+    delete body.requestType;
     const requestId = buildIdeRequestId({ body, request: transformedRequest, credentials, model, requestType: "agent" });
     transformedRequest.labels = buildAntigravityLabels(wireId, requestId);
 

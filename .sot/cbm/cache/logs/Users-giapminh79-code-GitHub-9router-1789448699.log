@@ -1,0 +1,5 @@
+# codebase-memory-mcp index coverage report
+# project=Users-giapminh79-code-GitHub-9router skipped=0 parse_partial=2
+# columns: phase	reason	path
+parse_partial	171-171,171-171	src/app/(dashboard)/dashboard/usage/components/ProviderTopology.js
+parse_partial	427-427	src/shared/components/Sidebar.js

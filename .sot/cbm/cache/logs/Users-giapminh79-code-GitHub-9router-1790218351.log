@@ -1,0 +1,23 @@
+# codebase-memory-mcp index coverage report
+# project=Users-giapminh79-code-GitHub-9router skipped=0 parse_partial=20
+# columns: phase	reason	path
+parse_partial	63-63,66-66,66-66,71-71,81-81,81-81	open-sse/providers/registry/xiaomi-mimo.js
+parse_partial	16-17,25-25,39-39,40-40,41-42,50-50	src/app/api/cli-tools/all-statuses/route.js
+parse_partial	21-22,44-44	src/app/api/v1/models/route.js
+parse_partial	2-2,2-2,4-4,4-4	src/app/globals.css
+parse_partial	500-500,540-540,545-545,570-570,813-813,829-829,833-833	src/shared/components/OAuthModal.js
+parse_partial	424-424	src/app/(dashboard)/dashboard/cli-tools/components/CoworkToolCard.js
+parse_partial	171-171,171-171	src/app/(dashboard)/dashboard/usage/components/ProviderTopology.js
+parse_partial	1-642	open-sse/providers/capabilities.js
+parse_partial	203-203,210-210,214-214,274-274,282-282,282-282,315-315,315-315,326-326,326-326,337-337,337-337,349-349,349-349,360-360,360-360,379-379,379-379,398-398,398-398,404-404,404-404	open-sse/executors/default.js
+parse_partial	1-2,11-11,16-16	tests/unit/xiaomi-mimo-executor.test.js
+parse_partial	1-1179	src/app/(dashboard)/dashboard/combos/page.js
+parse_partial	65-65,66-68,68-69,70-70	open-sse/services/usage.js
+parse_partial	1068-1068,1071-1071,1163-1163	src/app/(dashboard)/dashboard/profile/page.js
+parse_partial	415-416,440-440,634-635,651-651	open-sse/translator/formats/claude.js
+parse_partial	436-436	src/shared/components/Sidebar.js
+parse_partial	245-246,264-264,270-270,291-291,294-297,299-299	open-sse/shared/mimoAccount.js
+parse_partial	936-936,938-938	src/app/(dashboard)/dashboard/proxy-pools/page.js
+parse_partial	168-168,321-321	src/app/(dashboard)/dashboard/cli-tools/components/MitmServerCard.js
+parse_partial	38-38,39-39,80-80,84-84	src/app/api/oauth/xiaomi-mimo/api-key/route.js
+parse_partial	402-402	src/app/(dashboard)/dashboard/cli-tools/components/AntigravityToolCard.js

@@ -22,7 +22,7 @@ export function mapStainlessArch() {
 
 // Anthropic API version (single source — reused across claude-format providers/executors)
 export const ANTHROPIC_API_VERSION = "2023-06-01";
-export const CLAUDE_CLI_VERSION = "2.1.258";
+export const CLAUDE_CLI_VERSION = "2.1.280";
 
 // Shared Claude-compatible API headers (reused across claude-format providers)
 export const CLAUDE_API_HEADERS = {
@@ -64,8 +64,17 @@ const ANTHROPIC_BETA_HEAVY_AGENT = ["advanced-tool-use-2025-11-20", "effort-2025
 export const ANTHROPIC_1M_BETA = "context-1m-2025-08-07";
 
 // Heavy-agent beta flags are gated to opus/sonnet — cheaper models don't need them.
-export function selectAnthropicBeta(model = "") {
-  const flags = [...ANTHROPIC_BETA_BASE];
+// `redact-thinking` asks Anthropic to return signature-only thinking blocks, which
+// is right for clients that never render thinking but blanks the summaries a
+// client explicitly requested with `thinking.display: "summarized"`.
+const ANTHROPIC_BETA_REDACT_THINKING = "redact-thinking-2026-02-12";
+
+export function wantsThinkingSummaries(body) {
+  return body?.thinking?.display === "summarized";
+}
+
+export function selectAnthropicBeta(model = "", body = null) {
+  const flags = ANTHROPIC_BETA_BASE.filter((flag) => flag !== ANTHROPIC_BETA_REDACT_THINKING || !wantsThinkingSummaries(body));
   if (/^claude-(opus|sonnet)/.test(model)) flags.push(...ANTHROPIC_BETA_HEAVY_AGENT);
   return flags.join(",");
 }

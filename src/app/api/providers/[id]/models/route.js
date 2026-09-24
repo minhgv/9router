@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProviderConnectionById } from "@/models";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
-import { GEMINI_CONFIG } from "@/lib/oauth/constants/oauth";
+import { GEMINI_CONFIG, ZED_HOSTED_CONFIG } from "@/lib/oauth/constants/oauth";
 import { refreshGoogleToken, refreshCodexToken, updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveOllamaLocalHost } from "open-sse/config/providers.js";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
@@ -11,6 +11,7 @@ import { resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
+import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { resolveClineModels, resolveClinepassModels } from "open-sse/services/clinepassModels.js";
 import { resolveDevinModels } from "open-sse/services/devinModels.js";
 
@@ -126,6 +127,49 @@ const buildOAuthResolver = ({ refreshFn, fetchFn, parseFn, errorLabel }) => asyn
   }
   return { models: [], warning };
 };
+
+// Qoder shares one resolver across intl (qoder) and CN (qoder-cn); the
+// credentials carry the connection's provider so qoderModels picks the right
+// region's catalog endpoint, and the ids keep the provider prefix.
+function buildQoderModelsResolver(providerId) {
+  return {
+    customResolver: async (connection) => {
+      const credentials = {
+        provider: providerId,
+        accessToken: connection.accessToken,
+        apiKey: connection.apiKey,
+        refreshToken: connection.refreshToken,
+        email: connection.email,
+        displayName: connection.displayName,
+        providerSpecificData: connection.providerSpecificData || {},
+      };
+      let warning;
+      try {
+        const result = await resolveQoderModels(credentials, { forceRefresh: true });
+        if (result?.models?.length) {
+          return {
+            models: result.models.map((m) => ({
+              // Use the canonical "<providerId>/<key>" id so the dashboard
+              // surfaces the same identifier the chat router expects.
+              id: `${providerId}/${m.id}`,
+              name: m.name,
+              contextLength: m.contextLength,
+              isVL: m.isVL,
+              isReasoning: m.isReasoning,
+              maxOutputTokens: m.maxOutputTokens,
+              description: m.description,
+            })),
+          };
+        }
+        warning = "Qoder returned no models; falling back to static catalog.";
+      } catch (error) {
+        warning = `Failed to fetch Qoder models: ${error.message}`;
+        console.log("Failed to fetch Qoder models dynamically, falling back to static:", error.message);
+      }
+      return { models: [], warning };
+    },
+  };
+}
 
 // Provider models endpoints configuration
 const PROVIDER_MODELS_CONFIG = {
@@ -288,6 +332,44 @@ const PROVIDER_MODELS_CONFIG = {
       };
     },
   },
+  // Zed has no static catalog by design (live /models only) — same cursor
+  // direct pattern: resolve with the connection's own credentials (never
+  // exposed to the browser), return rich metadata, drop disabled entries.
+  // Empty/failure yields an explicit warning, never a silent zero list.
+  zed: {
+    customResolver: async (connection) => {
+      try {
+        const result = await resolveZedModels({
+          accessToken: connection.accessToken,
+          providerSpecificData: connection.providerSpecificData || {},
+        }, { config: ZED_HOSTED_CONFIG, forceRefresh: true });
+        const models = (result?.models || [])
+          .filter((m) => m && !m.isDisabled)
+          .map((m) => ({
+            id: m.id,
+            name: m.name || m.id,
+            provider: m.provider,
+            contextLength: m.contextLength,
+            contextLengthInMaxMode: m.contextLengthInMaxMode,
+            maxOutputTokens: m.maxOutputTokens,
+            supportsTools: m.supportsTools,
+            supportsImages: m.supportsImages,
+            supportsThinking: m.supportsThinking,
+            supportsDisablingThinking: m.supportsDisablingThinking,
+            supportsFastMode: m.supportsFastMode,
+            supportsServerSideCompaction: m.supportsServerSideCompaction,
+            supportedEffortLevels: m.supportedEffortLevels || [],
+            supportsStreamingTools: m.supportsStreamingTools,
+            supportsParallelToolCalls: m.supportsParallelToolCalls,
+          }));
+        if (models.length > 0) return { models };
+        return { models: [], warning: "Zed returned no live models." };
+      } catch (error) {
+        console.log("Failed to fetch Zed models dynamically:", error.message);
+        return { models: [], warning: `Failed to fetch Zed models: ${error.message}` };
+      }
+    },
+  },
 
   // Cline/ClinePass share api.cline.bot/api/v1/models. The service layer already
   // handles Bearer-vs-`workos:` auth and swallows failures into null, so these follow
@@ -365,42 +447,8 @@ const PROVIDER_MODELS_CONFIG = {
       return { models: [], warning };
     }
   },
-  qoder: {
-    customResolver: async (connection) => {
-      const credentials = {
-        accessToken: connection.accessToken,
-        apiKey: connection.apiKey,
-        refreshToken: connection.refreshToken,
-        email: connection.email,
-        displayName: connection.displayName,
-        providerSpecificData: connection.providerSpecificData || {},
-      };
-      let warning;
-      try {
-        const result = await resolveQoderModels(credentials, { forceRefresh: true });
-        if (result?.models?.length) {
-          return {
-            models: result.models.map((m) => ({
-              // Use the canonical "qoder/<key>" id so the dashboard
-              // surfaces the same identifier the chat router expects.
-              id: `qoder/${m.id}`,
-              name: m.name,
-              contextLength: m.contextLength,
-              isVL: m.isVL,
-              isReasoning: m.isReasoning,
-              maxOutputTokens: m.maxOutputTokens,
-              description: m.description,
-            })),
-          };
-        }
-        warning = "Qoder returned no models; falling back to static catalog.";
-      } catch (error) {
-        warning = `Failed to fetch Qoder models: ${error.message}`;
-        console.log("Failed to fetch Qoder models dynamically, falling back to static:", error.message);
-      }
-      return { models: [], warning };
-    },
-  },
+  qoder: buildQoderModelsResolver("qoder"),
+  "qoder-cn": buildQoderModelsResolver("qoder-cn"),
   "gemini-cli": {
     customResolver: buildOAuthResolver({
       refreshFn: (conn) => refreshGoogleToken(conn.refreshToken, GEMINI_CONFIG.clientId, GEMINI_CONFIG.clientSecret),

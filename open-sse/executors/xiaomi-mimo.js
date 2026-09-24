@@ -1,10 +1,18 @@
 import { DefaultExecutor } from "./default.js";
-import { getMimoAccountCookie, invalidateMimoAccountCookieCache, MIMO_API_BASE, MIMO_API_UA } from "../shared/mimoAccount.js";
+import { getMimoAccountCookie, invalidateMimoAccountCookieCache, resolveMimoServerBase, MIMO_API_UA } from "../shared/mimoAccount.js";
 
-// Desktop-exclusive Preview models. These are served by the account service's
-// /api/route proxy, authorized by the Xiaomi account session (NOT the sk- key).
-// See shared/mimoAccount.js for the session handshake.
-const PREVIEW_MODELS = new Set(["mimo-x-pro-preview", "mimo-x-flash-preview"]);
+// Dual-route v2.6 models.
+// v2.6 models dynamically route to the account service when desktop session credentials
+// (mimoPassToken or account cookie) are present to consume weekly quota, falling back to
+// the cloud API (sk- key) otherwise.
+const ACCOUNT_MODELS = new Set([
+  "mimo-v2.6-pro",
+  "mimo-v2.6-flash",
+  "mimo-v2.6-pro-ultraspeed",
+  // Desktop-exclusive preview models — account-service route only.
+  "mimo-x-pro-preview",
+  "mimo-x-flash-preview",
+]);
 
 // Session cookie resolved in execute() (async) and read back by buildHeaders()
 // (sync — BaseExecutor.execute does not await it). Carried on the per-request
@@ -23,15 +31,24 @@ export class XiaomiMimoExecutor extends DefaultExecutor {
     super("xiaomi-mimo");
   }
 
-  static isPreviewModel(model) {
-    return PREVIEW_MODELS.has(bareModel(model));
+  static isAccountRoute(model, credentials) {
+    const bare = bareModel(model);
+    if (!ACCOUNT_MODELS.has(bare)) return false;
+    return Boolean(
+      credentials?.[COOKIE_KEY] ||
+      credentials?.providerSpecificData?.mimoPassToken
+    );
+  }
+
+  isAccountRoute(model, credentials) {
+    return XiaomiMimoExecutor.isAccountRoute(model, credentials);
   }
 
   buildUrl(model, stream, urlIndex = 0, credentials = null) {
-    // Preview models live on the account-service route, which is not one of the
+    // Account route models live on the account-service route, which is not one of the
     // declared transports — resolve it before the default runtimeTransport path.
-    if (XiaomiMimoExecutor.isPreviewModel(model)) {
-      return `${MIMO_API_BASE}/api/route/chat/completions`;
+    if (this.isAccountRoute(model, credentials)) {
+      return `${resolveMimoServerBase(credentials?.providerSpecificData)}/api/route/chat/completions`;
     }
     const rawUrl = credentials?.runtimeTransport?.baseUrl || credentials?.providerSpecificData?.baseUrl;
     if (rawUrl && typeof rawUrl === "string" && /[\r\n\x00-\x1f\x7f]/.test(rawUrl)) {
@@ -43,12 +60,12 @@ export class XiaomiMimoExecutor extends DefaultExecutor {
   }
 
   buildHeaders(credentials, stream = true, url, model) {
-    if (XiaomiMimoExecutor.isPreviewModel(model) && credentials?.[COOKIE_KEY]) {
+    if (this.isAccountRoute(model, credentials) && credentials?.[COOKIE_KEY]) {
       const cookie = String(credentials[COOKIE_KEY]);
       if (/[\r\n\x00-\x1f\x7f]/.test(cookie)) {
         throw new Error("Invalid MiMo session cookie: contains control characters or CRLF");
       }
-      // Preview models authenticate with the account-session cookie, not the key.
+      // Account route models authenticate with the account-session cookie, not the key.
       return {
         "Content-Type": "application/json",
         Accept: stream ? "text/event-stream" : "application/json",
@@ -64,17 +81,22 @@ export class XiaomiMimoExecutor extends DefaultExecutor {
   }
 
   transformRequest(model, body, stream, credentials) {
-    // super runs stripUnsupportedParams, which flattens Preview content-part
+    // super runs stripUnsupportedParams, which flattens content-part
     // arrays (see the xiaomi-mimo rule in translator/concerns/paramSupport.js).
     const out = super.transformRequest(model, body, stream, credentials);
 
-    // Preview models: thinking/params get defaults only — never override what the
-    // caller set explicitly. (body.model is already `xiaomi/<id>` via upstreamModelId.)
-    if (XiaomiMimoExecutor.isPreviewModel(model)) {
-      if (out.thinking == null) out.thinking = { type: "enabled" };
+    // Account route models: bridge reasoning_effort to official output_config.effort
+    // (matches MiMo Desktop app.asar behavior).
+    if (this.isAccountRoute(model, credentials)) {
+      const rawEffort = out.reasoning_effort || body?.reasoning_effort || body?.output_config?.effort;
+      if (rawEffort) {
+        delete out.reasoning_effort;
+        const norm = String(rawEffort).toLowerCase() === "xhigh" ? "high" : String(rawEffort).toLowerCase();
+        out.output_config = { ...(out.output_config || {}), effort: norm };
+      }
+
       if (out.temperature == null) out.temperature = 1.0;
       if (out.top_p == null) out.top_p = 0.95;
-      if (!out.max_tokens) out.max_tokens = 4096;
     }
 
     return out;
@@ -82,13 +104,11 @@ export class XiaomiMimoExecutor extends DefaultExecutor {
 
   async execute(args) {
     const { model, credentials, proxyOptions = null } = args;
-    if (!XiaomiMimoExecutor.isPreviewModel(model)) return super.execute(args);
+    if (!this.isAccountRoute(model, credentials)) return super.execute(args);
 
     const cookie = await getMimoAccountCookie(credentials?.providerSpecificData, proxyOptions);
     if (!cookie) {
-      throw new Error(
-        "Xiaomi MiMo account session unavailable. Sign in to MiMo Desktop once so its passToken is present, then retry.",
-      );
+      return super.execute(args);
     }
     credentials[COOKIE_KEY] = cookie;
     const result = await super.execute(args);
@@ -106,6 +126,6 @@ export class XiaomiMimoExecutor extends DefaultExecutor {
   }
 }
 
-export const __test__ = { PREVIEW_MODELS, bareModel, COOKIE_KEY };
+export const __test__ = { ACCOUNT_MODELS, bareModel, COOKIE_KEY };
 
 export default XiaomiMimoExecutor;

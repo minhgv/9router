@@ -1,0 +1,11 @@
+# codebase-memory-mcp index coverage report
+# project=Users-giapminh79-code-GitHub-9router skipped=0 parse_partial=8
+# columns: phase	reason	path
+parse_partial	2-2,2-2,4-4,4-4	src/app/globals.css
+parse_partial	427-427	src/shared/components/Sidebar.js
+parse_partial	171-171,171-171	src/app/(dashboard)/dashboard/usage/components/ProviderTopology.js
+parse_partial	936-936,938-938	src/app/(dashboard)/dashboard/proxy-pools/page.js
+parse_partial	402-402	src/app/(dashboard)/dashboard/cli-tools/components/AntigravityToolCard.js
+parse_partial	1068-1068,1071-1071,1163-1163	src/app/(dashboard)/dashboard/profile/page.js
+parse_partial	424-424	src/app/(dashboard)/dashboard/cli-tools/components/CoworkToolCard.js
+parse_partial	168-168,321-321	src/app/(dashboard)/dashboard/cli-tools/components/MitmServerCard.js

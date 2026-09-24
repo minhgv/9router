@@ -1,7 +1,0 @@
-# codebase-memory-mcp index coverage report
-# project=Users-giapminh79-code-GitHub-9router skipped=0 parse_partial=4
-# columns: phase	reason	path
-parse_partial	386-386,393-393,401-401,407-407,408-408,410-411,412-412,417-417,417-417,449-449,455-455,459-459,492-492,506-506,515-515,528-528,539-539,539-539,572-572,572-572,666-666	open-sse/executors/antigravity.js
-parse_partial	203-203,210-210,214-214,274-274,282-282,282-282,315-315,315-315,326-326,326-326,337-337,337-337,349-349,349-349,360-360,360-360,379-379,379-379,398-398,398-398,404-404,404-404	open-sse/executors/default.js
-parse_partial	402-402	src/app/(dashboard)/dashboard/cli-tools/components/AntigravityToolCard.js
-parse_partial	2-2,2-2,4-4,4-4	src/app/globals.css

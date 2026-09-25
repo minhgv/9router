@@ -15,12 +15,27 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   proxyAwareFetch: vi.fn(),
+  getDevinCatalogSnapshot: vi.fn(),
+  invalidateDevinCatalog: vi.fn(),
 }));
 
 vi.mock("open-sse/utils/proxyFetch.js", () => ({
   proxyAwareFetch: mocks.proxyAwareFetch,
   default: mocks.proxyAwareFetch,
 }));
+
+// The executor consumes the shared discovery catalog; pin it to null so
+// these wire/URL contracts exercise the static-registry path with no
+// upstream discovery fetch.
+vi.mock("open-sse/services/devinCatalog.js", () => ({
+  getDevinCatalogSnapshot: mocks.getDevinCatalogSnapshot,
+  invalidateDevinCatalog: mocks.invalidateDevinCatalog,
+}));
+
+beforeEach(() => {
+  mocks.getDevinCatalogSnapshot.mockReset();
+  mocks.getDevinCatalogSnapshot.mockResolvedValue(null);
+});
 
 import zlib from "node:zlib";
 import { DevinExecutor } from "open-sse/executors/devin.js";

@@ -5,6 +5,7 @@ import {
   updateProviderConnection,
   deleteProviderConnection,
 } from "@/models";
+import { invalidateDevinCatalog } from "open-sse/services/devinCatalog.js";
 
 function normalizeProxyConfig(body = {}) {
   const hasAnyProxyField =
@@ -157,6 +158,11 @@ export async function PUT(request, { params }) {
 
     const updated = await updateProviderConnection(id, updateData);
 
+    // Devin catalog cache is keyed by connectionId — drop the snapshot when
+    // credentials or endpoint-relevant fields change (cheap Map.delete for
+    // non-devin connections).
+    if (existing.provider === "devin") invalidateDevinCatalog(id);
+
     // Hide sensitive fields
     const result = { ...updated };
     delete result.apiKey;
@@ -180,6 +186,9 @@ export async function DELETE(request, { params }) {
     if (!deleted) {
       return NextResponse.json({ error: "Connection not found" }, { status: 404 });
     }
+
+    // Keyed by connectionId; no-op when the deleted connection was not devin.
+    invalidateDevinCatalog(id);
 
     return NextResponse.json({ message: "Connection deleted successfully" });
   } catch (error) {

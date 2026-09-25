@@ -155,25 +155,3 @@ export function devinDynamicFamilies(lanes) {
   return families;
 }
 
-/**
- * Collapse a raw `clientModelConfigs` list into logical family descriptors.
- * Convenience wrapper that dedupes model uids (first wins) and files each
- * config into its family lane. Configs without collapsible family metadata
- * are simply absent from the result — callers merge the survivors back
- * themselves.
- *
- * @param {Array<object>} configs - decoded ClientModelConfig[]
- * @returns {Array<object>} family descriptors (see devinDynamicFamilies)
- */
-export function collapseDevinFamilies(configs) {
-  const lanes = new Map();
-  const seen = new Set();
-  for (const config of Array.isArray(configs) ? configs : []) {
-    const uid = typeof config?.modelUid === "string" ? config.modelUid : "";
-    if (!uid || seen.has(uid)) continue;
-    seen.add(uid);
-    collectDevinFamilyLane(lanes, config, uid);
-  }
-  return devinDynamicFamilies(lanes.values());
-}
-

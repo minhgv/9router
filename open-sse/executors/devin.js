@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../providers/index.js";
 import { getProviderModels } from "../config/providerModels.js";
+import { getDevinCatalogSnapshot } from "../services/devinCatalog.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { chatChunkSse } from "../utils/sse.js";
 import { SSE_DONE, SSE_HEADERS } from "../utils/sseConstants.js";
@@ -136,16 +137,18 @@ export class DevinExecutor extends BaseExecutor {
   // wire uid: exact effort route, else the nearest tier on the ladder (ties
   // clamp lower), else the family default. requiresEffort families have no
   // off tier upstream, so off/absent effort lands on defaultMember — never a
-  // nonexistent "-none" uid. Non-logical ids pass through unchanged.
+  // nonexistent "-none" uid. Non-logical ids pass through unchanged. The
+  // missing-default tail (resolveFamilyFallbackUid) guarantees a family
+  // routed via the dynamic catalog never emits its bare logical id.
   resolveWireUid(meta, effort) {
     const routing = meta?.effortRouting;
     if (!routing) return meta?.id ?? null;
     if (effort && routing[effort]) return routing[effort];
-    if (meta.requiresEffort && (effort === "off" || !effort)) return meta.defaultMember ?? meta.id;
-    if (!effort || effort === "off") return routing.off ?? meta.defaultMember ?? meta.id;
+    if (meta.requiresEffort && (effort === "off" || !effort)) return this.resolveFamilyFallbackUid(meta, routing);
+    if (!effort || effort === "off") return routing.off ?? this.resolveFamilyFallbackUid(meta, routing);
     const routedKeys = EFFORT_LADDER.filter((lvl) => routing[lvl]);
     const idx = EFFORT_LADDER.indexOf(effort);
-    if (routedKeys.length === 0 || idx < 0) return meta.defaultMember ?? meta.id;
+    if (routedKeys.length === 0 || idx < 0) return this.resolveFamilyFallbackUid(meta, routing);
     let best = routedKeys[0];
     for (const key of routedKeys) {
       if (Math.abs(EFFORT_LADDER.indexOf(key) - idx) < Math.abs(EFFORT_LADDER.indexOf(best) - idx)) {
@@ -155,14 +158,35 @@ export class DevinExecutor extends BaseExecutor {
     return routing[best];
   }
 
+  // Deterministic tail of resolveWireUid for routed families: while any
+  // concrete uid exists, never emit the bare logical id on the wire.
+  // Preference: defaultMember → first routed member → first family member
+  // (collapse hoists the server default to members[0]) → the logical id.
+  resolveFamilyFallbackUid(meta, routing) {
+    const firstRouted = routing ? Object.values(routing).find(Boolean) : undefined;
+    const firstMember = Array.isArray(meta?.members) ? meta.members[0] : undefined;
+    return meta?.defaultMember ?? firstRouted ?? firstMember ?? meta?.id ?? null;
+  }
+
   async execute({ model, body = {}, credentials, signal, log, proxyOptions = null }) {
     const sessionToken = this.resolveSessionToken(credentials);
     if (!sessionToken) {
       throw new Error("Devin requires an apiKey or accessToken (session token).");
     }
 
+    // Shared discovery catalog, pinned ONCE per request before the retry
+    // loop: every attempt and every hedged payload resolves against this
+    // one snapshot. Fail-open — catalog errors never break a request; a
+    // null snapshot falls back to the static registry (prior behavior).
+    let snapshot = null;
+    try {
+      snapshot = await getDevinCatalogSnapshot(credentials, { proxyOptions, signal });
+    } catch {
+      snapshot = null;
+    }
+
     const wireModel = this.resolveModelId(model);
-    const modelMeta = this.resolveModelMeta(wireModel);
+    const modelMeta = this.resolveModelMeta(wireModel, snapshot);
     const isRouterModel = modelMeta?.modelRouter === true;
     // Effort-routed families collapse to a sibling wire uid before any
     // payload is built; router models keep their AssignModel flow keyed on
@@ -172,7 +196,7 @@ export class DevinExecutor extends BaseExecutor {
     // Meta for capability-driven fields comes from the ROUTED member entry,
     // not the logical family entry (members absent from the static catalog
     // fall back to wire defaults).
-    const routedMeta = this.resolveModelMeta(wireUid);
+    const routedMeta = this.resolveModelMeta(wireUid, snapshot);
     const maxRetries = 2;
 
     // Retry loop for pre-stream requests (GetUserJwt and GetChatMessage initial connect)
@@ -204,6 +228,7 @@ export class DevinExecutor extends BaseExecutor {
               signal,
               log,
               proxyOptions,
+              snapshot,
             })
           : null;
         // Step 3: Build chat URL + headers (shared between hedged and non-hedged paths)
@@ -477,11 +502,20 @@ export class DevinExecutor extends BaseExecutor {
     return [];
   }
 
-  // Only static registry metadata reaches execution; PROVIDER_MODELS is keyed
-  // by the registry alias ("dv"). Ids unknown to the registry are concrete
-  // models — they take the direct chat lane with no assignment.
-  resolveModelMeta(wireModel) {
-    return getProviderModels("dv").find((m) => m?.id === wireModel) || null;
+  // Meta lookup: dynamic catalog snapshot first (raw member entries, then
+  // collapsed logical families), static registry ("dv") as the floor. Ids
+  // unknown to both are concrete models — they take the direct chat lane
+  // with no assignment. Snapshot family descriptors key the effort ladder
+  // as `routing` (possibly empty); normalize onto the registry's
+  // `effortRouting` shape with a shallow copy — the snapshot is immutable
+  // and shared across requests, and an empty routing must still route via
+  // the family fallback (never the bare synthetic logical id).
+  resolveModelMeta(wireModel, snapshot = null) {
+    const viaSnapshot = snapshot?.members?.get?.(wireModel) ?? snapshot?.families?.get?.(wireModel);
+    if (!viaSnapshot) return getProviderModels("dv").find((m) => m?.id === wireModel) || null;
+    return viaSnapshot.effortRouting || viaSnapshot.routing === undefined
+      ? viaSnapshot
+      : { ...viaSnapshot, effortRouting: viaSnapshot.routing };
   }
 
   /**
@@ -509,7 +543,7 @@ export class DevinExecutor extends BaseExecutor {
    * session credential only (no userJwt), matching the released CLI; the
    * prompt is the current user/developer turn, not the whole history.
    */
-  async assignModel({ routerUid, sessionToken, cascadeId, chatBaseUrl, body, signal, log, proxyOptions }) {
+  async assignModel({ routerUid, sessionToken, cascadeId, chatBaseUrl, body, signal, log, proxyOptions, snapshot = null }) {
     const request = {
       metadata: devinCliMetadata(sessionToken),
       modelRouterUid: routerUid,
@@ -547,7 +581,7 @@ export class DevinExecutor extends BaseExecutor {
     if (!assignedUid || !assignedJwt) {
       throw new Error("Devin AssignModel error: response carried no assignment JWT and model uid.");
     }
-    if (assignedUid === routerUid || this.isKnownRouterUid(assignedUid)) {
+    if (assignedUid === routerUid || this.isKnownRouterUid(assignedUid, snapshot)) {
       throw new Error(
         `Devin AssignModel error: server assigned router model UID "${assignedUid}" instead of a concrete model.`
       );
@@ -557,7 +591,11 @@ export class DevinExecutor extends BaseExecutor {
     return { ...decoded.assignment, modelUid: assignedUid, assignmentJwt: assignedJwt };
   }
 
-  isKnownRouterUid(uid) {
+  isKnownRouterUid(uid, snapshot = null) {
+    // Snapshot-aware: a dynamically discovered router uid must also trip the
+    // AssignModel guard on the routed path, not just static registry rows.
+    if (snapshot?.members?.get?.(uid)?.modelRouter === true) return true;
+    if (snapshot?.families?.get?.(uid)?.modelRouter === true) return true;
     return getProviderModels("dv").some((m) => m?.modelRouter === true && m?.id === uid);
   }
 

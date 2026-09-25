@@ -2,13 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 
 import {
   parseDevinModelConfigs,
+  parseDevinModelConfigsSplit,
   fetchDevinCliModelConfigs,
   resolveDevinModels,
   buildDevinUnaryHeaders,
 } from "../../open-sse/services/devinModels.js";
 import { parseDevinUserStatus, getDevinUsage } from "../../open-sse/services/usage/devin.js";
 import { getUsageForProvider } from "../../open-sse/services/usage.js";
-import { collapseDevinFamilies } from "../../open-sse/services/devinFamilies.js";
+import { invalidateDevinCatalog, getDevinCatalogSnapshot } from "../../open-sse/services/devinCatalog.js";
 import {
   toBinary,
   GetCliModelConfigsResponseSchema,
@@ -179,6 +180,28 @@ describe("devinModels service", () => {
     expect(await resolveDevinModels({ accessToken: " " })).toMatchObject({ status: 401 });
     expect(await resolveDevinModels({ apiKey: null })).toMatchObject({ status: 401 });
   });
+
+  it("warms the shared catalog so a snapshot call skips discovery (AC-08)", async () => {
+    invalidateDevinCatalog("conn-ac08");
+    const connection = { id: "conn-ac08", accessToken: SESSION_TOKEN };
+    const wire = {
+      clientModelConfigs: [{ label: "Adaptive", modelUid: "adaptive", modelInfo: { modelType: 2 } }],
+    };
+    const warmFetch = vi.fn().mockResolvedValue(protobufResponse(GetCliModelConfigsResponseSchema, wire));
+    const resolved = await resolveDevinModels(connection, { fetchFn: warmFetch });
+    expect(resolved.models.map((m) => m.id)).toEqual(["adaptive"]);
+    expect(warmFetch).toHaveBeenCalledTimes(1);
+
+    // The catalog is warm for this connection: no upstream discovery fetch.
+    const snapshotFetch = vi.fn();
+    const snapshot = await getDevinCatalogSnapshot(
+      { connectionId: "conn-ac08", accessToken: SESSION_TOKEN },
+      { fetchFn: snapshotFetch },
+    );
+    expect(snapshotFetch).not.toHaveBeenCalled();
+    expect(snapshot.members.get("adaptive")).toMatchObject({ id: "adaptive", name: "Adaptive" });
+    invalidateDevinCatalog("conn-ac08");
+  });
 });
 
 describe("devin usage handler", () => {
@@ -317,8 +340,12 @@ describe("devin family collapse", () => {
     });
   });
 
+  // Family-descriptor assertions (members ordering, defaultLevel) read the
+  // split parse output — the production path `parseDevinModelConfigs` wraps.
+  const parseFamilies = (configs) => parseDevinModelConfigsSplit({ clientModelConfigs: configs }).families;
+
   it("hoists the server-default member and recovers defaultLevel", () => {
-    const families = collapseDevinFamilies([
+    const families = parseFamilies([
       familyMember({ uid: "swe-2-medium", label: "SWE-2 Medium", familyLabel: "SWE-2", entries: [effortEntry("Medium", 2)] }),
       familyMember({ uid: "swe-2-max", label: "SWE-2 Max", familyLabel: "SWE-2", entries: [effortEntry("Max", 4)] }),
       familyMember({ uid: "swe-2-high", label: "SWE-2 High", familyLabel: "SWE-2", entries: [effortEntry("High", 3)], configDefault: true }),
@@ -334,14 +361,14 @@ describe("devin family collapse", () => {
   });
 
   it("honors metadata-level isDefaultModelInFamily and survives its absence", () => {
-    const withMetadataDefault = collapseDevinFamilies([
+    const withMetadataDefault = parseFamilies([
       familyMember({ uid: "a-med", label: "Lambda Med", familyLabel: "Lambda", entries: [effortEntry("Medium", 2)] }),
       familyMember({ uid: "a-high", label: "Lambda High", familyLabel: "Lambda", entries: [effortEntry("High", 3)], metadataDefault: true }),
     ]);
     expect(withMetadataDefault[0].defaultMember).toBe("a-high");
     expect(withMetadataDefault[0].defaultLevel).toBe("high");
 
-    const withoutDefault = collapseDevinFamilies([
+    const withoutDefault = parseFamilies([
       familyMember({ uid: "b-med", label: "Mu Med", familyLabel: "Mu", entries: [effortEntry("Medium", 2)] }),
       familyMember({ uid: "b-high", label: "Mu High", familyLabel: "Mu", entries: [effortEntry("High", 3)] }),
     ]);
@@ -351,7 +378,7 @@ describe("devin family collapse", () => {
   });
 
   it("keeps the first claim on duplicate effort names", () => {
-    const families = collapseDevinFamilies([
+    const families = parseFamilies([
       familyMember({ uid: "first", label: "Nu High", familyLabel: "Nu", entries: [effortEntry("High", 3)] }),
       familyMember({ uid: "second", label: "Nu High Too", familyLabel: "Nu", entries: [effortEntry("High", 3)] }),
     ]);
@@ -403,7 +430,7 @@ describe("devin family collapse", () => {
   });
 
   it("normalizes effort names across punctuation and case", () => {
-    const families = collapseDevinFamilies([
+    const families = parseFamilies([
       familyMember({ uid: "xh-1", label: "Alpha XH", familyLabel: "Alpha", entries: [{ key: "effort", value: { order: 2, name: "X High" } }] }),
       familyMember({ uid: "xh-2", label: "Beta XH", familyLabel: "Beta", entries: [{ key: "effort", value: { order: 2, name: "XHigh" } }] }),
       familyMember({ uid: "xh-3", label: "Gamma XH", familyLabel: "Gamma", entries: [{ key: "effort", value: { order: 2, name: "x-high" } }] }),
@@ -425,10 +452,10 @@ describe("devin family collapse", () => {
       familyMember({ uid: "omicron-turbo", label: "Omicron Turbo", familyLabel: "Omicron", entries: [{ key: "effort", value: { order: 2, name: "Turbo" } }] }),
       familyMember({ uid: "omicron-high", label: "Omicron High", familyLabel: "Omicron", entries: [effortEntry("High", 3)] }),
     ];
-    const models = parseDevinModelConfigs({ clientModelConfigs: configs });
-    expect(models.map((m) => m.id)).toEqual(["omicron"]);
+    const split = parseDevinModelConfigsSplit({ clientModelConfigs: configs });
+    expect(split.logical.map((m) => m.id)).toEqual(["omicron"]);
 
-    const [family] = collapseDevinFamilies(configs);
+    const [family] = split.families;
     expect(family.routing).toEqual({ high: "omicron-high" });
     expect(family.members).toEqual(expect.arrayContaining(["omicron-turbo", "omicron-high"]));
   });

@@ -2,11 +2,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   proxyAwareFetch: vi.fn(),
+  getDevinCatalogSnapshot: vi.fn(),
+  invalidateDevinCatalog: vi.fn(),
 }));
 
 vi.mock("open-sse/utils/proxyFetch.js", () => ({
   proxyAwareFetch: mocks.proxyAwareFetch,
   default: mocks.proxyAwareFetch,
+}));
+
+// W1's shared catalog module, consumed by the executor per the locked
+// contract. Every test defaults to a null snapshot (static-registry
+// behavior) unless it pins its own snapshot.
+vi.mock("open-sse/services/devinCatalog.js", () => ({
+  getDevinCatalogSnapshot: mocks.getDevinCatalogSnapshot,
+  invalidateDevinCatalog: mocks.invalidateDevinCatalog,
 }));
 
 import zlib from "node:zlib";
@@ -160,6 +170,13 @@ function decodeChatRequest(call) {
 function callPaths(calls) {
   return calls.map((c) => new URL(c.url).pathname);
 }
+
+// The executor requests the shared catalog on every call; unless a test
+// pins its own snapshot, default to null → static-registry behavior.
+beforeEach(() => {
+  mocks.getDevinCatalogSnapshot.mockReset();
+  mocks.getDevinCatalogSnapshot.mockResolvedValue(null);
+});
 
 
 describe("DevinExecutor Registration & Provider Config", () => {
@@ -2340,6 +2357,273 @@ describe("Devin Contract Residuals (DEV-01..04)", () => {
       expect(usageChunk.usage.total_tokens).toBe(1950);
       expect(usageChunk.usage.prompt_tokens_details.cached_tokens).toBe(400);
     });
+  });
+});
+
+describe("Devin shared catalog snapshot routing", () => {
+  let executor;
+  let proxyFetchSpy;
+  let savedHedge;
+
+  // Snapshot-only fixtures — absent from the static registry entirely.
+  const DYN_FAMILY = {
+    id: "org-dyn-family",
+    name: "Org Dyn Family",
+    members: ["org-dyn-high", "org-dyn-low"],
+    routing: { high: "org-dyn-high", low: "org-dyn-low" },
+    defaultMember: "org-dyn-high",
+    efforts: ["low", "high"],
+    requiresEffort: true,
+  };
+  const DYN_MEMBERS = [
+    { id: "org-dyn-high", name: "Org Dyn High", contextLength: 200000, toolUse: true, supportsParallelToolCalls: true },
+    { id: "org-dyn-low", name: "Org Dyn Low", contextLength: 200000, toolUse: true, supportsParallelToolCalls: true },
+  ];
+  const DYN_MAPS = {
+    families: new Map([[DYN_FAMILY.id, DYN_FAMILY]]),
+    members: new Map(DYN_MEMBERS.map((m) => [m.id, m])),
+    fetchedAt: 1,
+    generation: 1,
+  };
+
+  beforeEach(() => {
+    savedHedge = process.env.DEVIN_HEDGE;
+    process.env.DEVIN_HEDGE = "1";
+    executor = new DevinExecutor();
+    proxyFetchSpy = mocks.proxyAwareFetch;
+    proxyFetchSpy.mockReset();
+  });
+
+  afterEach(() => {
+    if (savedHedge === undefined) delete process.env.DEVIN_HEDGE;
+    else process.env.DEVIN_HEDGE = savedHedge;
+    vi.restoreAllMocks();
+  });
+
+  it("matrix 12 / AC-01: snapshot-only logical id routes to the discovered sibling uid", async () => {
+    mocks.getDevinCatalogSnapshot.mockResolvedValue(DYN_MAPS);
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/org-dyn-family",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "low" },
+      credentials: { apiKey: "tok", connectionId: "conn-1" },
+    });
+    expect(callPaths(calls)).toEqual([DEVIN_AUTH_PATH, DEVIN_CHAT_PATH]);
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("org-dyn-low");
+    // Pinned exactly once per request, with the contract args.
+    expect(mocks.getDevinCatalogSnapshot).toHaveBeenCalledTimes(1);
+    expect(mocks.getDevinCatalogSnapshot).toHaveBeenCalledWith(
+      { apiKey: "tok", connectionId: "conn-1" },
+      { proxyOptions: null, signal: undefined }
+    );
+  });
+
+  it("matrix 13 / AC-05: family without defaultMember falls back deterministically — never the bare logical id", async () => {
+    const noDefault = { ...DYN_FAMILY, defaultMember: undefined };
+    mocks.getDevinCatalogSnapshot.mockResolvedValue({
+      families: new Map([[noDefault.id, noDefault]]),
+      members: new Map(DYN_MEMBERS.map((m) => [m.id, m])),
+      fetchedAt: 1,
+      generation: 1,
+    });
+    // No effort → requiresEffort tail: first routed member (insertion order).
+    let calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/org-dyn-family",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      credentials: { apiKey: "tok" },
+    });
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("org-dyn-high");
+
+    // Degenerate family: routing present but valueless → members[0].
+    const bare = {
+      id: "org-bare",
+      name: "Bare",
+      members: ["org-bare-x", "org-bare-y"],
+      routing: {},
+      requiresEffort: true,
+    };
+    mocks.getDevinCatalogSnapshot.mockResolvedValue({
+      families: new Map([[bare.id, bare]]),
+      members: new Map(),
+      fetchedAt: 1,
+      generation: 1,
+    });
+    calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/org-bare",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "high" },
+      credentials: { apiKey: "tok" },
+    });
+    const uid = decodeChatRequest(calls[1]).chatModelUid;
+    expect(uid).toBe("org-bare-x");
+    expect(uid).not.toBe("org-bare");
+  });
+
+  it("resolveWireUid fallback chain: defaultMember → first routed → members[0] → logical id", () => {
+    // Direct calls take executor-shaped meta (effortRouting) — normalization
+    // from snapshot `routing` happens in resolveModelMeta, covered above.
+    const wireShaped = { ...DYN_FAMILY, effortRouting: DYN_FAMILY.routing };
+    expect(executor.resolveWireUid({ ...wireShaped, defaultMember: undefined }, null)).toBe("org-dyn-high");
+    expect(executor.resolveWireUid({ ...wireShaped, defaultMember: undefined }, "off")).toBe("org-dyn-high");
+    expect(
+      executor.resolveWireUid({ id: "f", effortRouting: {}, members: ["m1", "m2"], requiresEffort: true }, "off")
+    ).toBe("m1");
+    // All fallbacks exhausted → the logical id itself (documented last resort).
+    expect(executor.resolveWireUid({ id: "f", effortRouting: {}, members: [], requiresEffort: true }, "off")).toBe("f");
+  });
+
+  it("matrix 14 / AC-06: routed member meta comes from snapshot.members — maxTokens and parallel-tool flags honored", async () => {
+    const ghost = {
+      id: "org-ghost-member",
+      name: "Ghost Member",
+      contextLength: 150000,
+      toolUse: true,
+      supportsParallelToolCalls: true,
+      maxOutputTokens: 42000,
+    };
+    const ghostFamily = {
+      id: "org-ghost",
+      name: "Ghost Family",
+      members: ["org-ghost-member"],
+      routing: { high: "org-ghost-member" },
+      defaultMember: "org-ghost-member",
+      efforts: ["high"],
+      requiresEffort: true,
+    };
+    mocks.getDevinCatalogSnapshot.mockResolvedValue({
+      families: new Map([[ghostFamily.id, ghostFamily]]),
+      members: new Map([[ghost.id, ghost]]),
+      fetchedAt: 1,
+      generation: 1,
+    });
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/org-ghost",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "high" },
+      credentials: { apiKey: "tok" },
+    });
+    const chat = decodeChatRequest(calls[1]);
+    expect(chat.chatModelUid).toBe("org-ghost-member");
+    // maxOutputTokens from the discovered member — not the 128000 wire default.
+    expect(chat.configuration.maxTokens).toBe(42000n);
+    // supportsParallelToolCalls on the discovered member → serial flag stays off.
+    expect(chat.disableParallelToolCalls ?? false).toBe(false);
+  });
+
+  it("matrix 15a / AC-07: snapshot pinned across retry attempts", async () => {
+    let chatCalls = 0;
+    const calls = serveDevinEdge({
+      chat: () => {
+        chatCalls += 1;
+        if (chatCalls === 1) return new Response("boom", { status: 500 });
+        return new Response(createMockStream([chatStream()]), {
+          status: 200,
+          headers: { "content-type": "application/connect+proto" },
+        });
+      },
+    });
+    mocks.getDevinCatalogSnapshot.mockResolvedValue(DYN_MAPS);
+    await executor.execute({
+      model: "dv/org-dyn-family",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "high" },
+      credentials: { apiKey: "tok" },
+    });
+    expect(callPaths(calls)).toEqual([DEVIN_AUTH_PATH, DEVIN_CHAT_PATH, DEVIN_AUTH_PATH, DEVIN_CHAT_PATH]);
+    // Exactly one snapshot fetch for the whole request, across the retry.
+    expect(mocks.getDevinCatalogSnapshot).toHaveBeenCalledTimes(1);
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("org-dyn-high");
+    expect(decodeChatRequest(calls[3]).chatModelUid).toBe("org-dyn-high");
+  });
+
+  it("matrix 15b / AC-07: hedged payloads reuse the pinned snapshot and the routed uid", async () => {
+    process.env.DEVIN_HEDGE = "3";
+    mocks.getDevinCatalogSnapshot.mockResolvedValue(DYN_MAPS);
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/org-dyn-family",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "high" },
+      credentials: { apiKey: "tok" },
+    });
+    const chatCalls = calls.filter((c) => c.url.includes(DEVIN_CHAT_PATH));
+    expect(chatCalls).toHaveLength(3);
+    expect(mocks.getDevinCatalogSnapshot).toHaveBeenCalledTimes(1);
+    for (const call of chatCalls) {
+      expect(decodeChatRequest(call).chatModelUid).toBe("org-dyn-high");
+    }
+  });
+
+  it("matrix 16: null snapshot or catalog failure keeps today's static-registry behavior", async () => {
+    // Null snapshot (the file default): static swe-2 routing intact.
+    let calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe-2",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "low" },
+      credentials: { apiKey: "tok" },
+    });
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("swe-2-medium");
+
+    // Catalog throwing must never break the request (fail-open).
+    mocks.getDevinCatalogSnapshot.mockRejectedValue(new Error("catalog unavailable"));
+    calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe-2",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "high" },
+      credentials: { apiKey: "tok" },
+    });
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("swe-2-high");
+  });
+
+  it("matrix 17: dynamically discovered router model takes the AssignModel path", async () => {
+    mocks.getDevinCatalogSnapshot.mockResolvedValue({
+      families: new Map(),
+      members: new Map([
+        ["adaptive-org", { id: "adaptive-org", name: "Adaptive Org", toolUse: true, modelRouter: true }],
+      ]),
+      fetchedAt: 1,
+      generation: 1,
+    });
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/adaptive-org",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      credentials: { apiKey: "tok" },
+    });
+    expect(callPaths(calls)).toEqual([DEVIN_AUTH_PATH, DEVIN_ASSIGN_MODEL_PATH, DEVIN_CHAT_PATH]);
+    expect(decodeAssignRequest(calls[1]).modelRouterUid).toBe("adaptive-org");
+    // Chat carries the ASSIGNED concrete uid, resolved from the same snapshot.
+    expect(decodeChatRequest(calls[2]).chatModelUid).toBe("claude-sonnet-4-5");
+  });
+
+  it("matrix 17b: snapshot-known router uid echoed back by AssignModel fails the turn", async () => {
+    mocks.getDevinCatalogSnapshot.mockResolvedValue({
+      families: new Map(),
+      members: new Map([
+        ["adaptive-org", { id: "adaptive-org", name: "Adaptive Org", toolUse: true, modelRouter: true }],
+        ["adaptive-alt", { id: "adaptive-alt", name: "Adaptive Alt", toolUse: true, modelRouter: true }],
+      ]),
+      fetchedAt: 1,
+      generation: 1,
+    });
+    serveDevinEdge({
+      // Server assigns a DIFFERENT snapshot-known router uid (not the
+      // requested one, not in the static registry) — only the
+      // snapshot-aware isKnownRouterUid can trip the guard.
+      assignment: () =>
+        new Response(
+          toBinary(AssignModelResponseSchema, {
+            assignment: { assignmentJwt: "assign-jwt", modelUid: "adaptive-alt" },
+          }),
+          { status: 200, headers: { "content-type": "application/proto" } }
+        ),
+    });
+    await expect(
+      executor.execute({
+        model: "dv/adaptive-org",
+        body: { messages: [{ role: "user", content: "hi" }] },
+        credentials: { apiKey: "tok" },
+      })
+    ).rejects.toThrow(/instead of a concrete model/);
   });
 });
 

@@ -14,6 +14,7 @@
 | Executor | `open-sse/executors/devin.js` | `DevinExecutor` — full custom `execute()`: GetUserJwt → AssignModel → GetChatMessage, Connect stream → OpenAI SSE |
 | Protobuf codec | `open-sse/utils/devinProtobuf.js` | Hand-rolled proto3 codec (ProtoWriter/ProtoReader), IR schemas, Connect framing, metadata builders, token/url helpers |
 | Model discovery | `open-sse/services/devinModels.js` | `GetCliModelConfigs` unary RPC → live model lineup (~398 entries) for the dashboard |
+| Shared catalog | `open-sse/services/devinCatalog.js` | Connection-scoped in-memory snapshot of discovery results (families + raw members over the static floor); executor's routing source. TTL 10min + stale-while-revalidate, in-flight dedupe, generation guard |
 | Usage/quota | `open-sse/services/usage/devin.js` | `GetUserStatus` unary RPC → daily/weekly quota %, prompt credits, plan info |
 | Capabilities | `open-sse/providers/capabilities.js:135-152` | Per-model `reasoning`/`vision`/`contextWindow`/`maxOutput` |
 | Pricing | `open-sse/providers/pricing.js:130-147` | Metered SWE rates; third-party models are ACU-billed (0.00 token rates) |
@@ -21,7 +22,8 @@
 | OAuth constants | `src/lib/oauth/constants/oauth.js:127` | `DEVIN_CONFIG = PROVIDER_OAUTH["devin"]` |
 | Loopback proxy | `src/lib/oauth/utils/server.js:940-1042` | Fixed-port `127.0.0.1:59653` callback server + server-side token exchange |
 | OAuth route | `src/app/api/oauth/[provider]/[action]/route.js` | `start`/`poll`/`stop` actions wired for `devin` |
-| Models route | `src/app/api/providers/[id]/models/route.js:470` | `customResolver` → `resolveDevinModels` |
+| Models route | `src/app/api/providers/[id]/models/route.js:470` | `customResolver` → `resolveDevinModels` (also warms the shared catalog for that connection) |
+| Connection route | `src/app/api/providers/[id]/route.js` | PUT/DELETE call `invalidateDevinCatalog(id)` so credential/endpoint changes drop the cached snapshot |
 | Token refresh | `open-sse/services/tokenRefresh.js:155` | `devin: () => null` — no refresh endpoint |
 | Migration | `src/lib/db/migrations/002-remove-devin-cli-connections.js` | Drops stale `devin-cli` connection rows |
 | Tests | `tests/unit/devin-executor.test.js`, `devin-protobuf.test.js`, `devin-models-usage.test.js`, `devin-oauth-provider.test.js` | Wire-level mocked edge (GetUserJwt/AssignModel/GetChatMessage recorder) |
@@ -140,17 +142,21 @@ devin section). Before any payload is built:
   `sonnet`/`claude`→`claude-sonnet-5`, `haiku`→`claude-haiku-4-5`,
   `gemini`→`gemini-3-7-flash`, `gpt`→`gpt-5-6-terra`, `codex`→`gpt-5-3-codex`,
   plus dotted spellings `swe-1.7`→`swe-1-7`, `glm-5.2`→`glm-5-2`, …).
-- **Routing** (`resolveWireUid`): exact `effortRouting[effort]`, else the
-  nearest tier on the ladder `[off, minimal, low, medium, high, xhigh, max]`
-  (ties clamp to the lower tier), else `defaultMember`. `requiresEffort`
-  families have no off tier upstream — off/absent effort lands on
-  `defaultMember`, never a nonexistent `-none` uid.
+- **Routing** (`resolveWireUid`): deterministic chain — exact
+  `effortRouting[effort]` → nearest tier on the ladder
+  `[off, minimal, low, medium, high, xhigh, max]` (ties clamp to the lower
+  tier) → `defaultMember` → first value in `effortRouting` → `members[0]` →
+  `meta.id`. `requiresEffort` families have no off tier upstream — off/absent
+  effort lands on `defaultMember`, never a nonexistent `-none` uid. The chain
+  guarantees a routed member uid whenever routing exists; a bare logical id
+  is never put on the wire.
+- **Catalog snapshot**: `execute()` pins `getDevinCatalogSnapshot(credentials)` once per request (before the retry loop; retries + hedged payloads share it). `resolveModelMeta` resolves `snapshot.members.get(id) ?? snapshot.families.get(id) ?? static registry` — so a family/member known only via discovery still routes, and routed-member meta (`disableParallelToolCalls`, `maxTokens`) comes from the discovered entry. Null snapshot → static-only, identical to pre-catalog behavior.
 - **Routed member meta**: `disableParallelToolCalls` and the `maxTokens`
-  fallback resolve from the ROUTED member's registry entry (wire defaults
-  when the member has no row — members are upstream wire uids and need no
-  registry rows).
+  fallback resolve from the ROUTED member's entry — snapshot `members` map
+  first, static registry as floor (wire defaults when neither has a row).
 - **Unchanged paths**: raw sibling ids and unknown ids pass through raw; the
-  `adaptive` router path keeps AssignModel keyed on the router uid.
+  `adaptive` router path keeps AssignModel keyed on the router uid
+  (snapshot-aware, so a discovered router entry still resolves).
 
 ---
 
@@ -222,7 +228,7 @@ Per-request auth: session token goes in `metadata.apiKey` (normalized with `devi
 
 ## 8. Models
 
-Static catalog in registry (60 entries: raw sibling uids + logical effort-routed families + legacy); dashboard fetches the live lineup via `resolveDevinModels` → `GetCliModelConfigs` (filters `modelType === 2` CHAT, dedups by `modelUid`, exposes `creditMultiplier`, `contextLength`, `maxOutputTokens`, `supportsImages/Thinking/ToolCalls/ParallelToolCalls`, `modelRouter`, `family`, `isRecommended`; collapsed families emit the same `effortRouting`/`defaultMember` shape).
+Static catalog in registry (60 entries: raw sibling uids + logical effort-routed families + legacy) is the **floor**; the shared catalog (`devinCatalog.js`) overlays the live `GetCliModelConfigs` discovery per connection — `families` (collapsed logical entries, atomic per-family replace) + `members` (all raw discovered uids) — so the executor can route ids the static table lacks. Dashboard fetches the live lineup via `resolveDevinModels` → `GetCliModelConfigs` (filters `modelType === 2` CHAT, dedups by `modelUid`, exposes `creditMultiplier`, `contextLength`, `maxOutputTokens`, `supportsImages/Thinking/ToolCalls/ParallelToolCalls`, `modelRouter`, `family`, `isRecommended`; collapsed families emit the same `effortRouting`/`defaultMember` shape) and warms the catalog as a side effect. Cache scope: `connectionId` (or token-hash+baseUrl); TTL 10min with stale-while-revalidate; failure keeps last-known-good else static-only.
 
 | Group | Ids | Notes |
 |---|---|---|
@@ -233,7 +239,7 @@ Static catalog in registry (60 entries: raw sibling uids + logical effort-routed
 | Third-party raw | `claude-opus-5-medium`, `claude-fable-5-1-medium`, `claude-sonnet-5-medium`, `gemini-3-8-flash-medium`, `gpt-5-6-sol/luna-medium`, `gpt-6-astra-medium`, `glm-5-2`, `glm-5-3-low/high/max`, `kimi-k3-high` | ACU-billed (`creditMultiplier`), no per-token metered rate; `glm-5-2` doubles as a logical family id |
 | Legacy | `swe-check`, `swe-1-6`, `swe-1-6-fast` | Kept for existing combos; absent from current discovery |
 
-Unknown ids (not in the registry and not a provider alias) are treated as **concrete models** — direct chat lane, no AssignModel, no effort routing (documented limitation: server-only families route raw until the static table is updated).
+Unknown ids (not in the registry, snapshot, or a provider alias) are treated as **concrete models** — direct chat lane, no AssignModel, no effort routing. Server-only families discovered via `GetCliModelConfigs` route through the catalog snapshot even without a registry row; the static table remains the floor when discovery is unavailable.
 
 Pricing: SWE models metered (`swe-2` family: $0.75/$3.75 per Mtok); third-party entries are `0.00` — billed in ACUs on the Devin plan (logical ids via the provider-scoped `PROVIDER_PRICING.devin` block so vendor-canonical rates never collide).
 
@@ -286,3 +292,4 @@ Pricing: SWE models metered (`swe-2` family: $0.75/$3.75 per Mtok); third-party 
 9. int32 fields decode via the 64-bit varint path (negative values sign-extend to 10-byte varints).
 10. `customApiServerUrl` only honored after `sanitizeCustomApiServerUrl` (https, no userinfo, no IP/localhost).
 11. `requiresEffort` families never emit a nonexistent `-none` uid — off/absent effort resolves to `defaultMember`; the `adaptive` router uid is still the only id that goes through AssignModel.
+12. The catalog snapshot is pinned once per request (before retries/hedging); `resolveWireUid` never emits a bare logical id — it always resolves through the fallback chain to a member uid. Catalog/discovery failures are fail-open: null snapshot → static registry only.

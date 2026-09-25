@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
+import { invalidateDevinCatalog } from "open-sse/services/devinCatalog.js";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
@@ -90,8 +91,17 @@ export async function DELETE(request, { params }) {
       return NextResponse.json({ error: "Provider node not found" }, { status: 404 });
     }
 
+    // Bulk-deleting the devin node drops every devin connection — collect ids
+    // first so their catalog snapshots can be invalidated (cache is keyed by
+    // connectionId).
+    const devinConnIds = id === "devin"
+      ? (await getProviderConnections()).filter((c) => c.provider === "devin").map((c) => c.id)
+      : [];
+
     await deleteProviderConnectionsByProvider(id);
     await deleteProviderNode(id);
+
+    for (const connId of devinConnIds) invalidateDevinCatalog(connId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

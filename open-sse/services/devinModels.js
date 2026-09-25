@@ -21,6 +21,7 @@ import {
 } from "../utils/devinProtobuf.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { collectDevinFamilyLane, devinDynamicFamilies } from "./devinFamilies.js";
+import { warmDevinCatalog, getDevinCatalogEpoch } from "./devinCatalog.js";
 
 // Connect unary RPC headers, wire-captured from devin-cli: Basic auth with
 // the session token repeated on both sides of a `-` (Basic {token}-{token}).
@@ -39,18 +40,22 @@ function encodeCliModelConfigsRequest(sessionToken) {
   return toBinary(GetCliModelConfigsRequestSchema, { metadata });
 }
 /**
- * Map raw clientModelConfigs to dashboard model entries.
- * Keeps only chat-usable entries (modelInfo.modelType CHAT = 2). The router
- * semantic (displayOption MODEL_ROUTER or modelInfo.isModelRouter) and the
- * parallel-tool capability are preserved so execution metadata stays coherent
- * with the static registry.
+ * Parse raw clientModelConfigs into the three shapes downstream needs:
+ * `logical` — dashboard model entries (chat-usable only, modelInfo.modelType
+ * CHAT = 2) with server-declared families collapsed into one logical entry
+ * per family carrying `effortRouting` / `defaultMember` / `efforts` /
+ * `requiresEffort`; the members it replaces are removed from the output.
+ * `families` — the collapsed family descriptors (`devinDynamicFamilies`
+ * output); `rawMembers` — every pre-collapse chat entry, family members
+ * included. The shared catalog snapshot needs all three, so
+ * `parseDevinModelConfigs` is this split with `.logical` taken.
  *
- * Server-declared model families (modelFamilyMetadata) are collapsed into one
- * logical entry per family carrying `effortRouting` / `defaultMember` /
- * `efforts` / `requiresEffort`; the members it replaces are removed from the
- * output. Configs without family metadata stay standalone.
+ * The router semantic (displayOption MODEL_ROUTER or modelInfo.isModelRouter)
+ * and the parallel-tool capability are preserved so execution metadata stays
+ * coherent with the static registry. Configs without family metadata stay
+ * standalone.
  */
-export function parseDevinModelConfigs(response) {
+export function parseDevinModelConfigsSplit(response) {
   const configs = Array.isArray(response?.clientModelConfigs) ? response.clientModelConfigs : [];
   const models = [];
   const seen = new Set();
@@ -81,7 +86,13 @@ export function parseDevinModelConfigs(response) {
       ...(cfg.isRecommended ? { isRecommended: true } : {}),
     });
   }
-  return applyFamilyCollapse(models, devinDynamicFamilies(lanes.values()));
+  const families = devinDynamicFamilies(lanes.values());
+  return { logical: applyFamilyCollapse(models, families), families, rawMembers: models };
+}
+
+/** Dashboard/executor parse: the collapsed logical entries of the split. */
+export function parseDevinModelConfigs(response) {
+  return parseDevinModelConfigsSplit(response).logical;
 }
 
 /**
@@ -148,6 +159,7 @@ export async function fetchDevinCliModelConfigs(sessionToken, options = {}) {
       method: "POST",
       headers: buildDevinUnaryHeaders(normalized),
       body,
+      ...(options.signal ? { signal: options.signal } : {}),
     },
     proxyOptions,
   );
@@ -158,10 +170,16 @@ export async function fetchDevinCliModelConfigs(sessionToken, options = {}) {
   }
 
   const payload = Buffer.from(await response.arrayBuffer());
+  // A zero-length body IS a valid proto message (empty lineup): static-floor
+  // discovery, not a decode failure.
+  if (payload.length === 0) return { clientModelConfigs: [] };
   const decoded = decodeDevinUnaryMessage(GetCliModelConfigsResponseSchema, payload);
-  if (!decoded || !Array.isArray(decoded.clientModelConfigs)) {
+  if (!decoded) {
     throw new Error("GetCliModelConfigs response was not decodable protobuf.");
   }
+  // protobufjs omits empty repeated fields — an empty-but-valid lineup is a
+  // real (static-floor-only) discovery, not a decode failure.
+  if (!Array.isArray(decoded.clientModelConfigs)) decoded.clientModelConfigs = [];
   return decoded;
 }
 
@@ -174,10 +192,20 @@ export async function resolveDevinModels(connection, options = {}) {
     return { error: "Devin session token not available.", status: 401 };
   }
   try {
+    // Capture the invalidation epoch BEFORE the fetch: a PUT/DELETE that lands
+    // while this await is in flight must fence our warm publish, else a
+    // discovery started pre-invalidation re-poisons the cache with
+    // pre-rotation credentials.
+    const baseEpoch = getDevinCatalogEpoch(connection);
     const decoded = await fetchDevinCliModelConfigs(token, {
+      ...(options.fetchFn ? { fetchFn: options.fetchFn } : {}),
       ...(options.proxyOptions ? { proxyOptions: options.proxyOptions } : {}),
       ...(connection.providerSpecificData?.apiBaseUrl ? { baseUrl: connection.providerSpecificData.apiBaseUrl } : {}),
     });
+    // Publish into the shared catalog so the executor finds a warm snapshot
+    // for this connection without a second discovery round-trip (fail-open:
+    // warm errors must not fail the dashboard fetch).
+    warmDevinCatalog(connection, decoded, { baseEpoch });
     return { models: parseDevinModelConfigs(decoded) };
   } catch (error) {
     const status = /401|403/.test(error.message) ? 401 : 502;

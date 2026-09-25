@@ -42,6 +42,10 @@ const DEFAULT_MAX_TOKENS = 128000;
 const DEFAULT_TEMPERATURE = 0.4;
 const DEFAULT_TOP_P = 1;
 
+// Effort ladder for nearest-tier clamping (off first; ties clamp to the
+// lower tier). Mirrors the oh-my-pi effort axis ordering.
+const EFFORT_LADDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
 export class DevinExecutor extends BaseExecutor {
   constructor() {
     super("devin", PROVIDERS.devin);
@@ -87,7 +91,68 @@ export class DevinExecutor extends BaseExecutor {
     let m = model.trim();
     if (m.startsWith("devin/")) m = m.slice("devin/".length);
     else if (m.startsWith("dv/")) m = m.slice("dv/".length);
+    // Client-side effort selector suffix ("swe-2(max)") never reaches the wire.
+    m = m.replace(/\([^()]+\)\s*$/, "").trim();
+    m = this.resolveProviderAlias(m);
     return m || "swe-1-6";
+  }
+
+  // Short/dotted provider aliases (oh-my-pi parity): "swe" → the Lightning
+  // family, "opus" → Opus 5, dotted spellings ("swe-1.7") → canonical ids.
+  resolveProviderAlias(model) {
+    const aliases = PROVIDERS.devin?.providerAliases;
+    if (!aliases) return model;
+    return aliases[model.toLowerCase()] || model;
+  }
+
+  // Reasoning-effort source priority: reasoning_effort → reasoning.effort →
+  // output_config.effort (Claude-source) → thinking.type === "disabled".
+  // The native "none" tier normalizes to "off"; null = no effort requested.
+  resolveEffort(body) {
+    const disabled = body?.thinking?.type === "disabled";
+    const raw = body?.reasoning_effort ?? body?.reasoning?.effort ?? body?.output_config?.effort;
+    if (raw === undefined || raw === null || String(raw).trim() === "") {
+      return disabled ? "off" : null;
+    }
+    const effort = String(raw).trim().toLowerCase();
+    if (!effort) return disabled ? "off" : null;
+    return effort === "none" ? "off" : effort;
+  }
+
+  // Per-request effort from the "model(level)" selector suffix — the inline
+  // override for provider-level thinking modes (which land in
+  // body.reasoning_effort upstream). Falls back to the suffix only when the
+  // body carries no effort of its own.
+  resolveSuffixEffort(model) {
+    if (typeof model !== "string") return null;
+    const match = model.match(/\(([^()]+)\)\s*$/);
+    if (!match) return null;
+    const effort = match[1].trim().toLowerCase();
+    if (!effort) return null;
+    return effort === "none" ? "off" : effort;
+  }
+
+  // Logical variant families (registry `effortRouting`) resolve to the sibling
+  // wire uid: exact effort route, else the nearest tier on the ladder (ties
+  // clamp lower), else the family default. requiresEffort families have no
+  // off tier upstream, so off/absent effort lands on defaultMember — never a
+  // nonexistent "-none" uid. Non-logical ids pass through unchanged.
+  resolveWireUid(meta, effort) {
+    const routing = meta?.effortRouting;
+    if (!routing) return meta?.id ?? null;
+    if (effort && routing[effort]) return routing[effort];
+    if (meta.requiresEffort && (effort === "off" || !effort)) return meta.defaultMember ?? meta.id;
+    if (!effort || effort === "off") return routing.off ?? meta.defaultMember ?? meta.id;
+    const routedKeys = EFFORT_LADDER.filter((lvl) => routing[lvl]);
+    const idx = EFFORT_LADDER.indexOf(effort);
+    if (routedKeys.length === 0 || idx < 0) return meta.defaultMember ?? meta.id;
+    let best = routedKeys[0];
+    for (const key of routedKeys) {
+      if (Math.abs(EFFORT_LADDER.indexOf(key) - idx) < Math.abs(EFFORT_LADDER.indexOf(best) - idx)) {
+        best = key;
+      }
+    }
+    return routing[best];
   }
 
   async execute({ model, body = {}, credentials, signal, log, proxyOptions = null }) {
@@ -99,6 +164,15 @@ export class DevinExecutor extends BaseExecutor {
     const wireModel = this.resolveModelId(model);
     const modelMeta = this.resolveModelMeta(wireModel);
     const isRouterModel = modelMeta?.modelRouter === true;
+    // Effort-routed families collapse to a sibling wire uid before any
+    // payload is built; router models keep their AssignModel flow keyed on
+    // the router uid (assignment happens below on this same wireModel).
+    const effort = this.resolveEffort(body) ?? this.resolveSuffixEffort(model);
+    const wireUid = isRouterModel ? wireModel : this.resolveWireUid(modelMeta, effort) ?? wireModel;
+    // Meta for capability-driven fields comes from the ROUTED member entry,
+    // not the logical family entry (members absent from the static catalog
+    // fall back to wire defaults).
+    const routedMeta = this.resolveModelMeta(wireUid);
     const maxRetries = 2;
 
     // Retry loop for pre-stream requests (GetUserJwt and GetChatMessage initial connect)
@@ -143,12 +217,12 @@ export class DevinExecutor extends BaseExecutor {
           "user-agent": "connect-go/1.18.1 (go1.26.3)",
         };
 
-        const hedge = this.hedgeCount(assignment?.modelUid ?? wireModel);
+        const hedge = this.hedgeCount(assignment?.modelUid ?? wireUid);
 
         if (hedge <= 1) {
           // Single request — no hedging
           const requestPayload = this.buildChatPayload({
-            body, model: wireModel, modelMeta, assignment, sessionToken, userJwt, cascadeId, log,
+            body, model: wireUid, modelMeta: routedMeta, assignment, sessionToken, userJwt, cascadeId, log,
           });
           const protoBinary = toBinary(GetChatMessageRequestSchema, requestPayload);
           const framedBody = buildConnectFrame(protoBinary, true);
@@ -195,7 +269,7 @@ export class DevinExecutor extends BaseExecutor {
           const hedgePayloads = Array.from({ length: hedge }, () => {
             const hedgeCascadeId = crypto.randomUUID();
             const payload = this.buildChatPayload({
-              body, model: wireModel, modelMeta, assignment, sessionToken, userJwt,
+              body, model: wireUid, modelMeta: routedMeta, assignment, sessionToken, userJwt,
               cascadeId: hedgeCascadeId, log,
             });
             const binary = toBinary(GetChatMessageRequestSchema, payload);

@@ -18,9 +18,9 @@ import {
 
 import { getExecutor, hasSpecializedExecutor } from "open-sse/executors/index.js";
 import { PROVIDERS } from "open-sse/config/providers.js";
-import { MODEL_PRICING } from "open-sse/providers/pricing.js";
-import { MODEL_CAPABILITIES } from "open-sse/providers/capabilities.js";
-import { PROVIDER_MODELS, getProviderModels } from "open-sse/config/providerModels.js";
+import { MODEL_PRICING, getPricingForModel } from "open-sse/providers/pricing.js";
+import { MODEL_CAPABILITIES, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { PROVIDER_MODELS, getProviderModels, isValidModel } from "open-sse/config/providerModels.js";
 import devinRegistry from "open-sse/providers/registry/devin.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
 import {
@@ -194,8 +194,9 @@ describe("DevinExecutor Registration & Provider Config", () => {
     });
 
     const models = PROVIDER_MODELS.dv;
-    expect(models).toHaveLength(23);
+    expect(models).toHaveLength(60);
     expect(models.map((m) => m.id)).toEqual([
+      // Raw sibling uids (kept for backward compat)
       "swe-2-high",
       "swe-2-medium",
       "swe-2-max",
@@ -216,6 +217,45 @@ describe("DevinExecutor Registration & Provider Config", () => {
       "glm-5-3-high",
       "glm-5-3-max",
       "kimi-k3-high",
+      // Logical effort-routed variant families
+      "swe-2",
+      "claude-opus-5",
+      "claude-opus-5-fast",
+      "claude-fable-5",
+      "claude-sonnet-5",
+      "claude-opus-4-7",
+      "claude-opus-4-7-fast",
+      "claude-opus-4-8",
+      "claude-opus-4-8-fast",
+      "gpt-5-2",
+      "gpt-5-3-codex",
+      "gpt-5-3-codex-fast",
+      "gpt-5-4",
+      "gpt-5-4-fast",
+      "gpt-5-4-mini",
+      "gpt-5-5",
+      "gpt-5-5-fast",
+      "gpt-5-6-luna",
+      "gpt-5-6-luna-fast",
+      "gpt-5-6-sol",
+      "gpt-5-6-sol-fast",
+      "gpt-5-6-terra",
+      "gpt-5-6-terra-fast",
+      "kimi-k3",
+      "grok-4-5",
+      "inkling",
+      "gemini-3-1-pro",
+      "gemini-3-5-flash",
+      "gemini-3-6-flash",
+      "gemini-3-flash",
+      "glm-5-2-1m",
+      "gemini-3-7-flash",
+      "grok-4-6",
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "nemotron-3-ultra",
+      "claude-haiku-4-5",
+      // Legacy
       "swe-check",
       "swe-1-6",
       "swe-1-6-fast",
@@ -225,21 +265,78 @@ describe("DevinExecutor Registration & Provider Config", () => {
       name: "SWE-2 High",
       contextLength: 262000,
     });
-    expect(models[21]).toMatchObject({
+    expect(models[57]).toMatchObject({
+      id: "swe-check",
+      name: "SWE-check",
+      contextLength: 200000,
+    });
+    expect(models[58]).toMatchObject({
       id: "swe-1-6",
       name: "SWE-1.6",
       contextLength: 200000,
     });
-    expect(models[22]).toMatchObject({
+    expect(models[59]).toMatchObject({
       id: "swe-1-6-fast",
       name: "SWE-1.6 Fast",
       contextLength: 200000,
     });
 
-    // Every lineup model has metered pricing; legacy models keep output caps.
+    // Logical effort-routed family entry per the collapse contract.
+    expect(models.find((m) => m.id === "swe-2")).toMatchObject({
+      name: "SWE-2",
+      contextLength: 262000,
+      toolUse: true,
+      supportsParallelToolCalls: true,
+      effortRouting: { medium: "swe-2-medium", high: "swe-2-high", max: "swe-2-max" },
+      defaultMember: "swe-2-high",
+      efforts: ["medium", "high", "max"],
+      requiresEffort: true,
+    });
+    // Merged families: the raw max-tier uid doubles as the logical family id.
+    expect(models.find((m) => m.id === "swe-1-7")).toMatchObject({
+      name: "SWE-1.7",
+      effortRouting: { medium: "swe-1-7-medium", max: "swe-1-7" },
+      defaultMember: "swe-1-7",
+      efforts: ["medium", "max"],
+      requiresEffort: true,
+    });
+    expect(models.find((m) => m.id === "swe-1-7-lightning")).toMatchObject({
+      name: "SWE-1.7 Lightning",
+      defaultMember: "swe-1-7-lightning-medium",
+      requiresEffort: true,
+    });
+    expect(models.find((m) => m.id === "glm-5-2")).toMatchObject({
+      name: "GLM-5.2",
+      effortRouting: { high: "glm-5-2", xhigh: "glm-5-2" },
+      defaultMember: "glm-5-2",
+      efforts: ["high", "xhigh"],
+      requiresEffort: true,
+    });
+    expect(devinRegistry.providerAliases).toMatchObject({
+      swe: "swe-1-7-lightning",
+      opus: "claude-opus-5",
+      sonnet: "claude-sonnet-5",
+      claude: "claude-sonnet-5",
+      haiku: "claude-haiku-4-5",
+      gemini: "gemini-3-7-flash",
+      gpt: "gpt-5-6-terra",
+      codex: "gpt-5-3-codex",
+      "swe-1.7": "swe-1-7",
+      "glm-5.2": "glm-5-2",
+    });
+    // No duplicate ids: merged families must not double-register.
+    const ids = models.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    // Every lineup model resolves pricing (canonical or provider-scoped) and
+    // devin capabilities through the provider chain — logical ids must not
+    // fall through to another vendor's canonical entry (e.g. anthropic
+    // claude-adaptive format). The no-thinking haiku family is the exception.
     for (const m of models) {
-      expect(MODEL_PRICING[m.id]).toBeDefined();
-      expect(MODEL_CAPABILITIES[m.id]).toBeDefined();
+      expect(getPricingForModel("devin", m.id)).toBeDefined();
+      const caps = getCapabilitiesForModel("devin", m.id);
+      expect(caps.contextWindow).toBeGreaterThan(0);
+      if (m.id !== "claude-haiku-4-5") expect(caps.thinkingFormat).toBe("openai");
     }
     expect(MODEL_PRICING["swe-2-high"]).toMatchObject({ input: 0.75, output: 3.75, cached: 0.075 });
     expect(MODEL_PRICING["swe-1-7-lightning"]).toMatchObject({ input: 2.5, output: 12.5, cached: 1 });
@@ -1507,6 +1604,265 @@ describe("DevinExecutor Execution & Wire Protocol", () => {
   });
 });
 
+describe("Devin effort routing (variant collapse)", () => {
+  let executor;
+  let proxyFetchSpy;
+  let savedHedge;
+
+  beforeEach(() => {
+    savedHedge = process.env.DEVIN_HEDGE;
+    process.env.DEVIN_HEDGE = "1";
+    executor = new DevinExecutor();
+    proxyFetchSpy = mocks.proxyAwareFetch;
+    proxyFetchSpy.mockReset();
+  });
+
+  afterEach(() => {
+    if (savedHedge === undefined) delete process.env.DEVIN_HEDGE;
+    else process.env.DEVIN_HEDGE = savedHedge;
+    vi.restoreAllMocks();
+  });
+
+  it("resolveEffort: source priority, normalization, and thinking-disabled", () => {
+    expect(executor.resolveEffort({ reasoning_effort: "HIGH" })).toBe("high");
+    expect(executor.resolveEffort({ reasoning: { effort: "Max" } })).toBe("max");
+    expect(executor.resolveEffort({ output_config: { effort: "Medium" } })).toBe("medium");
+    expect(executor.resolveEffort({ reasoning_effort: "none" })).toBe("off");
+    // Explicit effort wins over a disabled-thinking flag.
+    expect(executor.resolveEffort({ reasoning_effort: "high", thinking: { type: "disabled" } })).toBe("high");
+    expect(executor.resolveEffort({ thinking: { type: "disabled" } })).toBe("off");
+    expect(executor.resolveEffort({})).toBeNull();
+    expect(executor.resolveEffort({ reasoning_effort: "   " })).toBeNull();
+  });
+
+  it("resolveWireUid: exact route, nearest clamp (ties lower), default member, passthrough", () => {
+    const swe2 = getProviderModels("dv").find((m) => m.id === "swe-2");
+    expect(executor.resolveWireUid(swe2, "medium")).toBe("swe-2-medium");
+    expect(executor.resolveWireUid(swe2, "high")).toBe("swe-2-high");
+    expect(executor.resolveWireUid(swe2, "max")).toBe("swe-2-max");
+    // Clamp: low/minimal → nearest routed tier (medium); xhigh ties between
+    // high and max (dist 1 each) → clamps to the lower tier (high).
+    expect(executor.resolveWireUid(swe2, "low")).toBe("swe-2-medium");
+    expect(executor.resolveWireUid(swe2, "minimal")).toBe("swe-2-medium");
+    expect(executor.resolveWireUid(swe2, "xhigh")).toBe("swe-2-high");
+    // requiresEffort: no off tier upstream → default member, never "-none".
+    expect(executor.resolveWireUid(swe2, "off")).toBe("swe-2-high");
+    expect(executor.resolveWireUid(swe2, null)).toBe("swe-2-high");
+    // Unknown effort string → default member.
+    expect(executor.resolveWireUid(swe2, "banana")).toBe("swe-2-high");
+    // Non-logical meta passes through; null meta yields null (caller falls
+    // back to the raw wire model).
+    expect(executor.resolveWireUid(getProviderModels("dv").find((m) => m.id === "swe-2-high"), "low")).toBe("swe-2-high");
+    expect(executor.resolveWireUid(null, "high")).toBeNull();
+  });
+
+  it.each([
+    ["medium", "swe-2-medium"],
+    ["high", "swe-2-high"],
+    ["max", "swe-2-max"],
+  ])("swe-2 + reasoning_effort %s routes the exact sibling uid", async (effort, uid) => {
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe-2",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: effort },
+      credentials: { apiKey: "tok" },
+    });
+    expect(callPaths(calls)).toEqual([DEVIN_AUTH_PATH, DEVIN_CHAT_PATH]);
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe(uid);
+  });
+
+  it("swe-2 without effort defaults to the recommended member", async () => {
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe-2",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      credentials: { apiKey: "tok" },
+    });
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("swe-2-high");
+  });
+
+  it("swe-2 effort none/off (requiresEffort) lands on the default member, never a -none uid", async () => {
+    for (const effort of ["none", "off"]) {
+      const calls = serveDevinEdge();
+      await executor.execute({
+        model: "dv/swe-2",
+        body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: effort },
+        credentials: { apiKey: "tok" },
+      });
+      const uid = decodeChatRequest(calls[1]).chatModelUid;
+      expect(uid).toBe("swe-2-high");
+      expect(uid).not.toContain("none");
+    }
+  });
+
+  it("swe-2(low) clamps to the nearest routed tier", async () => {
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe-2",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "low" },
+      credentials: { apiKey: "tok" },
+    });
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("swe-2-medium");
+  });
+
+  it("model(level) suffix strips and routes: swe-2(max) → swe-2-max", async () => {
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe-2(max)",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      credentials: { apiKey: "tok" },
+    });
+    expect(callPaths(calls)).toEqual([DEVIN_AUTH_PATH, DEVIN_CHAT_PATH]);
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("swe-2-max");
+  });
+
+  it("raw sibling swe-2-high passes through even with effort set", async () => {
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "swe-2-high",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "low" },
+      credentials: { apiKey: "tok" },
+    });
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("swe-2-high");
+  });
+
+  it("adaptive still routes via AssignModel; effort never mangles the router path", async () => {
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "adaptive",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "max" },
+      credentials: { apiKey: "tok" },
+    });
+    expect(callPaths(calls)).toEqual([DEVIN_AUTH_PATH, DEVIN_ASSIGN_MODEL_PATH, DEVIN_CHAT_PATH]);
+    const chat = decodeChatRequest(calls[2]);
+    expect(chat.chatModelUid).toBe("claude-sonnet-4-5");
+    expect(chat.modelAssignmentJwt).toBe("assign-jwt");
+    expect(chat.chatModelUid).not.toBe("adaptive");
+  });
+
+  it("honors reasoning:{effort} and output_config:{effort} sources end-to-end", async () => {
+    let calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe-2",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning: { effort: "max" } },
+      credentials: { apiKey: "tok" },
+    });
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("swe-2-max");
+
+    calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe-2",
+      body: { messages: [{ role: "user", content: "hi" }], output_config: { effort: "medium" } },
+      credentials: { apiKey: "tok" },
+    });
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("swe-2-medium");
+  });
+
+  it("hedged payloads all carry the routed uid and routed-member parallel-tool flag", async () => {
+    process.env.DEVIN_HEDGE = "3";
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe-2",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "high" },
+      credentials: { apiKey: "tok" },
+    });
+    const chatCalls = calls.filter((c) => new URL(c.url).pathname === DEVIN_CHAT_PATH);
+    expect(chatCalls).toHaveLength(3);
+    for (const call of chatCalls) {
+      const chat = decodeChatRequest(call);
+      expect(chat.chatModelUid).toBe("swe-2-high");
+      // Routed member swe-2-high advertises parallel tool calls — the flag
+      // must come from the routed member meta, not the logical entry.
+      expect(chat.disableParallelToolCalls ?? false).toBe(false);
+    }
+  });
+
+  it("provider aliases route through the family: dv/swe and dv/swe-1.7", async () => {
+    let calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "medium" },
+      credentials: { apiKey: "tok" },
+    });
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("swe-1-7-lightning-medium");
+
+    // No effort → the kdl default-level tier (medium).
+    calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe",
+      body: { messages: [{ role: "user", content: "hi" }] },
+      credentials: { apiKey: "tok" },
+    });
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("swe-1-7-lightning-medium");
+
+    calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe-1.7",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "max" },
+      credentials: { apiKey: "tok" },
+    });
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("swe-1-7");
+  });
+
+  it("unknown logical id (server family absent from the static table) passes through raw", async () => {
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/future-family-x",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "high" },
+      credentials: { apiKey: "tok" },
+    });
+    expect(callPaths(calls)).toEqual([DEVIN_AUTH_PATH, DEVIN_CHAT_PATH]);
+    expect(decodeChatRequest(calls[1]).chatModelUid).toBe("future-family-x");
+  });
+
+  it("maxTokens falls back to wire defaults when the routed member carries no cap", async () => {
+    const calls = serveDevinEdge();
+    await executor.execute({
+      model: "dv/swe-2",
+      body: { messages: [{ role: "user", content: "hi" }], reasoning_effort: "max" },
+      credentials: { apiKey: "tok" },
+    });
+    const chat = decodeChatRequest(calls[1]);
+    expect(chat.chatModelUid).toBe("swe-2-max");
+    // swe-2-max has no maxOutputTokens row → DEFAULT_MAX_TOKENS.
+    expect(chat.configuration.maxTokens).toBe(128000n);
+  });
+
+  it("registry integrity: routing targets resolve, ids unique, siblings and pricing stay valid", () => {
+    const models = getProviderModels("dv");
+    for (const m of models) {
+      if (!m.effortRouting) continue;
+      expect(Array.isArray(m.efforts)).toBe(true);
+      for (const uid of [...Object.values(m.effortRouting), m.defaultMember]) {
+        expect(typeof uid).toBe("string");
+        expect(uid.length).toBeGreaterThan(0);
+      }
+    }
+    // swe-2 routes land on raw sibling rows in the static catalog.
+    const swe2 = models.find((m) => m.id === "swe-2");
+    for (const uid of Object.values(swe2.effortRouting)) {
+      expect(models.some((x) => x.id === uid)).toBe(true);
+    }
+    const ids = models.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    // Raw sibling ids and logical ids both validate; the swe-2 pricing row hits.
+    expect(isValidModel("dv", "swe-2-high")).toBe(true);
+    expect(isValidModel("dv", "swe-2")).toBe(true);
+    expect(getPricingForModel("devin", "swe-2")).toMatchObject({ input: 0.75, output: 3.75, cached: 0.075 });
+  });
+
+  it("thinking levels follow the family ladders", async () => {
+    const { getThinkingLevels } = await import("open-sse/providers/thinkingLevels.js");
+    expect(getThinkingLevels("devin", "swe-2")).toEqual(["medium", "high", "max"]);
+    expect(getThinkingLevels("devin", "swe-1-7")).toEqual(["medium", "max"]);
+    expect(getThinkingLevels("devin", "claude-opus-5")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    // Off-capable families expose none.
+    expect(getThinkingLevels("devin", "gpt-5-6-terra")).toContain("none");
+    // Other providers are untouched by the devin-scoped rows and caps.
+    expect(getThinkingLevels("anthropic", "claude-opus-5")).toEqual(["none", "low", "medium", "high", "max"]);
+  });
+});
+
 describe("Devin upstream content-policy sanitizer", () => {
   const ZCODE_SECURITY_PARAGRAPH =
     "IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.";
@@ -1660,6 +2016,14 @@ describe("Devin Contract Residuals (DEV-01..04)", () => {
       expect(executor.resolveModelId("devin/swe-1-7")).toBe("swe-1-7");
       expect(executor.resolveModelId("swe-1-6")).toBe("swe-1-6");
       expect(executor.resolveModelId("dv/custom-devin-model")).toBe("custom-devin-model");
+      // Effort-selector suffix never reaches the wire uid.
+      expect(executor.resolveModelId("dv/swe-2(max)")).toBe("swe-2");
+      expect(executor.resolveModelId("dv/gpt-5.6-sol(high)")).toBe("gpt-5-6-sol");
+      // Provider aliases: short family names + dotted spellings.
+      expect(executor.resolveModelId("dv/swe")).toBe("swe-1-7-lightning");
+      expect(executor.resolveModelId("swe-1.7")).toBe("swe-1-7");
+      expect(executor.resolveModelId("opus")).toBe("claude-opus-5");
+      expect(executor.resolveModelId("codex")).toBe("gpt-5-3-codex");
     });
 
     it("builds the default chat endpoint URL", () => {

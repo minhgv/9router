@@ -147,13 +147,17 @@ export const MODEL_CAPABILITIES = {
   // Devin (Cognition) Cascade swe models — text-only (image-blind upstream),
   // stream reasoning via deltaThinking. Context/output caps from
   // GetCliModelConfigs (2026-09 capture); legacy output caps 64k/128k.
+  // swe-2 / swe-1-7 / swe-1-7-lightning / glm-5-2 double as logical
+  // effort-routed family ids — requiresEffort families cannot disable
+  // thinking (no off tier upstream).
+  "swe-2":                    { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 262000 },
   "swe-2-high":               { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
   "swe-2-medium":             { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
   "swe-2-max":                { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
-  "swe-1-7":                  { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
-  "swe-1-7-medium":           { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
-  "swe-1-7-lightning":        { reasoning: true, thinkingFormat: "openai", contextWindow: 202752 },
-  "swe-1-7-lightning-medium": { reasoning: true, thinkingFormat: "openai", contextWindow: 202752 },
+  "swe-1-7":                  { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 262000 },
+  "swe-1-7-medium":           { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 262000 },
+  "swe-1-7-lightning":        { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 202752 },
+  "swe-1-7-lightning-medium": { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 202752 },
   "swe-check":                { reasoning: true, thinkingFormat: "openai", contextWindow: 200000 },
   "swe-1-6":                  { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 64000 },
   "swe-1-6-fast":             { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 128000 },
@@ -168,7 +172,7 @@ export const MODEL_CAPABILITIES = {
   "gpt-5-6-sol-medium":       { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
   "gpt-5-6-luna-medium":      { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
   "gpt-6-astra-medium":       { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
-  "glm-5-2":                  { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 128000 },
+  "glm-5-2":                  { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 128000 },
   "glm-5-3-low":              { reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 128000 },
   "glm-5-3-high":             { reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 128000 },
   "glm-5-3-max":              { reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 128000 },
@@ -196,6 +200,52 @@ export const PROVIDER_CAPABILITIES = {
     "z-ai/glm-5.2": { reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 128000 },
     "deepseek-ai/deepseek-v4-pro": { reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 65536 },
     "deepseek-ai/deepseek-v4-flash": { reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 65536 },
+  },
+  // Devin (dv) logical variant families — provider-scoped because these ids
+  // collide with other vendors' canonical models (anthropic claude-opus-5,
+  // zai kimi-k3, antigravity gemini-3-1-pro, …); MODEL_CAPABILITIES entries
+  // would clobber them. Caps reuse each family's known sibling/pattern values;
+  // thinkingFormat is openai (reasoning_effort → chatModelUid routing).
+  // thinkingCanDisable:false only where requiresEffort (no off route).
+  "devin": {
+    "claude-opus-5":            { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 128000 },
+    "claude-opus-5-fast":       { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 128000 },
+    "claude-fable-5":           { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 128000 },
+    "claude-sonnet-5":          { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 128000 },
+    "claude-opus-4-7":          { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 128000 },
+    "claude-opus-4-7-fast":     { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 128000 },
+    "claude-opus-4-8":          { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 128000 },
+    "claude-opus-4-8-fast":     { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 128000 },
+    // No-thinking single-member family (kdl `no-thinking`).
+    "claude-haiku-4-5":         { vision: true, reasoning: false, contextWindow: 200000 },
+    "gpt-5-2":                  { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-3-codex":            { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-3-codex-fast":       { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-4":                  { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-4-fast":             { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-4-mini":             { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-5":                  { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-5-fast":             { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-6-luna":             { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-6-luna-fast":        { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-6-sol":              { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-6-sol-fast":         { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-6-terra":            { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "gpt-5-6-terra-fast":       { vision: true, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "kimi-k3":                  { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 131072 },
+    "grok-4-5":                 { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 500000, maxOutput: 64000 },
+    "grok-4-6":                 { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 500000, maxOutput: 500000 },
+    // Context window unverified upstream — devin-common 262k assumed.
+    "inkling":                  { reasoning: true, thinkingFormat: "openai", contextWindow: 262000 },
+    "gemini-3-1-pro":           { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65535 },
+    "gemini-3-5-flash":         { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65536 },
+    "gemini-3-6-flash":         { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65536 },
+    "gemini-3-flash":           { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65536 },
+    "gemini-3-7-flash":         { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1048576, maxOutput: 65536 },
+    "glm-5-2-1m":               { reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 },
+    "deepseek-v4-flash":        { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 384000 },
+    "deepseek-v4-pro":          { reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 384000 },
+    "nemotron-3-ultra":         { reasoning: true, thinkingFormat: "openai", contextWindow: 128000 },
   },
   // glm-5.3-flash on OpenCode Go is served by a backend that rejects the z.ai
   // `thinking` object (400: unknown field "thinking") and wants reasoning_effort.

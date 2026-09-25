@@ -39,6 +39,8 @@ import {
   ModelFeaturesSchema,
   ModelInfoSchema,
   ModelFamilyMetadataSchema,
+  ModelFamilyMetadataEntrySchema,
+  ModelFamilyMetadataValueSchema,
   ModelDimensionSchema,
   ClientModelConfigSchema,
   GetCliModelConfigsRequestSchema,
@@ -809,6 +811,101 @@ describe("devinProtobuf", () => {
       expect(dec.clientModelConfigs[0].isPremium).toBe(true);
       expect(dec.clientModelConfigs[0].supportsImages).toBe(true);
       expect(dec.clientModelConfigs[0].isDefaultModelInFamily).toBe(true);
+    });
+
+    it("round-trips ModelFamilyMetadataSchema with effort axis entries", () => {
+      const metadata = {
+        modelFamilyLabel: "SWE-2",
+        isDefaultModelInFamily: true,
+        entries: [
+          { key: "reasoning effort", value: { order: 2, name: "Medium" } },
+          { key: "reasoning effort", value: { order: 3, name: "High" } },
+          { key: "1m context", value: { order: 1, name: "1M" } },
+        ],
+      };
+      const bin = toBinary(ModelFamilyMetadataSchema, metadata);
+      const dec = fromBinary(ModelFamilyMetadataSchema, bin);
+      expect(dec.modelFamilyLabel).toBe("SWE-2");
+      expect(dec.isDefaultModelInFamily).toBe(true);
+      expect(dec.entries).toHaveLength(3);
+      expect(dec.entries[0]).toEqual({ key: "reasoning effort", value: { order: 2, name: "Medium" } });
+      expect(dec.entries[1].value).toEqual({ order: 3, name: "High" });
+      expect(dec.entries[2].value).toEqual({ order: 1, name: "1M" });
+    });
+
+    it("round-trips family metadata nested in ClientModelConfigSchema", () => {
+      const config = {
+        label: "SWE-2 High",
+        modelUid: "swe-2-high",
+        modelInfo: { modelType: 2 },
+        isDefaultModelInFamily: true,
+        modelFamilyMetadata: {
+          modelFamilyLabel: "SWE-2",
+          entries: [{ key: "effort", value: { order: 3, name: "High" } }],
+        },
+      };
+      const bin = toBinary(GetCliModelConfigsResponseSchema, { clientModelConfigs: [config] });
+      const dec = fromBinary(GetCliModelConfigsResponseSchema, bin);
+      const meta = dec.clientModelConfigs[0].modelFamilyMetadata;
+      expect(meta.modelFamilyLabel).toBe("SWE-2");
+      expect(dec.clientModelConfigs[0].isDefaultModelInFamily).toBe(true);
+      expect(meta.entries).toEqual([{ key: "effort", value: { order: 3, name: "High" } }]);
+    });
+
+    it("decodes negative order int32 through the 64-bit varint path", () => {
+      // Hand-crafted wire: negative int32 is a 10-byte sign-extended varint,
+      // which a 32-bit varint reader rejects.
+      const valueBytes = Buffer.concat([
+        Buffer.from([0x08]), // field 1 (order), wire type 0
+        encodeVarint(-1),
+        Buffer.from([0x12, 0x03]), // field 2 (name), wire type 2
+        Buffer.from("Max", "utf8"),
+      ]);
+      const entryBytes = Buffer.concat([
+        Buffer.from([0x0a, 0x06]), // field 1 (key), wire type 2
+        Buffer.from("effort", "utf8"),
+        Buffer.from([0x12, valueBytes.length]), // field 2 (value), wire type 2
+        valueBytes,
+      ]);
+      const dec = fromBinary(ModelFamilyMetadataEntrySchema, entryBytes);
+      expect(dec.key).toBe("effort");
+      expect(dec.value.order).toBe(-1);
+      expect(dec.value.name).toBe("Max");
+
+      const bin = toBinary(ModelFamilyMetadataValueSchema, { order: -1, name: "Max" });
+      expect(fromBinary(ModelFamilyMetadataValueSchema, bin).order).toBe(-1);
+    });
+
+    it("decodes metadata without entries and entries without values", () => {
+      const bare = fromBinary(
+        ModelFamilyMetadataSchema,
+        toBinary(ModelFamilyMetadataSchema, { modelFamilyLabel: "SWE-2" })
+      );
+      expect(bare.modelFamilyLabel).toBe("SWE-2");
+      expect(bare.entries).toBeUndefined();
+
+      const bin = toBinary(ModelFamilyMetadataEntrySchema, { key: "effort", value: undefined });
+      const dec = fromBinary(ModelFamilyMetadataEntrySchema, bin);
+      expect(dec.key).toBe("effort");
+      expect(dec.value).toBeUndefined();
+    });
+
+    it("ignores unknown fields inside family metadata entries and values", () => {
+      const valueBytes = Buffer.concat([
+        Buffer.from([0x08, 0x03]), // field 1 (order) = 3
+        Buffer.from([0x12, 0x04]), // field 2 (name) "High"
+        Buffer.from("High", "utf8"),
+        Buffer.from([0x48, 0x2a]), // unknown field 9 varint 42
+      ]);
+      const entryBytes = Buffer.concat([
+        Buffer.from([0x0a, 0x06]), // field 1 (key) "effort"
+        Buffer.from("effort", "utf8"),
+        Buffer.from([0x12, valueBytes.length]), // field 2 (value)
+        valueBytes,
+        Buffer.from([0x72, 0x02, 0x01, 0x02]), // unknown field 14 length-delimited
+      ]);
+      const dec = fromBinary(ModelFamilyMetadataEntrySchema, entryBytes);
+      expect(dec).toEqual({ key: "effort", value: { order: 3, name: "High" } });
     });
 
     it("round-trips DevinPlanInfoSchema, PlanInfoSchema, and UserStatusSchema", () => {

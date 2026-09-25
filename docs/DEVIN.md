@@ -10,7 +10,7 @@
 
 | Layer | File | Role |
 |---|---|---|
-| Registry | `open-sse/providers/registry/devin.js` | Provider config: OAuth endpoints, static model catalog (24 entries) |
+| Registry | `open-sse/providers/registry/devin.js` | Provider config: OAuth endpoints, static model catalog (60 entries: raw sibling uids + logical effort-routed families + legacy), provider aliases |
 | Executor | `open-sse/executors/devin.js` | `DevinExecutor` — full custom `execute()`: GetUserJwt → AssignModel → GetChatMessage, Connect stream → OpenAI SSE |
 | Protobuf codec | `open-sse/utils/devinProtobuf.js` | Hand-rolled proto3 codec (ProtoWriter/ProtoReader), IR schemas, Connect framing, metadata builders, token/url helpers |
 | Model discovery | `open-sse/services/devinModels.js` | `GetCliModelConfigs` unary RPC → live model lineup (~398 entries) for the dashboard |
@@ -61,12 +61,16 @@ Client (OpenAI format — registry transport.format = "openai")
   → src/app/api/v1/* → src/sse/handlers/chat.js → chatCore.js
   → DevinExecutor.execute()                       [custom, bypasses BaseExecutor.execute]
       1. resolveSessionToken  → normalizeDevinSessionToken (adds "devin-session-token$" prefix)
-      2. resolveModelId       → strips "devin/"/"dv/" prefix; default "swe-1-6"
-      3. fetchUserJwt         → POST GetUserJwt → {userJwt, customApiServerUrl?}
-      4. assignModel          → ONLY if modelMeta.modelRouter (e.g. "adaptive")
-      5. buildChatPayload     → GetChatMessageRequest protobuf (§4)
-      6. POST GetChatMessage  → Connect-framed gzip protobuf
-      7. createSseStream      → Connect frames → OpenAI SSE chunks (§5)
+      2. resolveModelId       → strips "devin/"/"dv/" prefix and the "(level)"
+                                effort suffix, resolves provider aliases
+                                (swe/opus/gpt/…, dotted spellings); default "swe-1-6"
+      3. resolveEffort + resolveWireUid → body reasoning_effort (or the
+                                model(level) suffix) → sibling wire uid (§4.3)
+      4. fetchUserJwt         → POST GetUserJwt → {userJwt, customApiServerUrl?}
+      5. assignModel          → ONLY if modelMeta.modelRouter (e.g. "adaptive")
+      6. buildChatPayload     → GetChatMessageRequest protobuf (§4)
+      7. POST GetChatMessage  → Connect-framed gzip protobuf
+      8. createSseStream      → Connect frames → OpenAI SSE chunks (§5)
   → SSE to client
 ```
 
@@ -83,13 +87,13 @@ Mirrors released devin-cli 3000.6.2, `requestType: CASCADE` (**enum value 5**, N
   metadata: devinCliMetadata(sessionToken, userJwt),  // §7
   prompt: "<sanitized system prompt>",               // all system/developer msgs joined \n\n
   chatMessagePrompts: [ /* user/assistant/tool turns, §4.1 */ ],
-  chatModelUid: "<assigned uid | wire model>",       // router uid NEVER sent here
+  chatModelUid: "<assigned uid | routed wire uid>",  // router uid NEVER sent here
   modelAssignmentJwt: "<from AssignModel>",          // only for router models
   requestType: 5,                                    // CASCADE
   plannerMode: 1,                                    // DEFAULT
   toolChoice: { optionName: "auto" },
   systemPromptCacheOptions: { type: 1 },             // EPHEMERAL
-  disableParallelToolCalls: !modelMeta.supportsParallelToolCalls,
+  disableParallelToolCalls: !routedMeta.supportsParallelToolCalls,
   cascadeId: "<uuid, shared with AssignModel>",
   executionId: "<uuid>",
   configuration: {
@@ -119,6 +123,34 @@ Mirrors released devin-cli 3000.6.2, `requestType: CASCADE` (**enum value 5**, N
 - Request: `{metadata (no userJwt), modelRouterUid, cascadeId, chatMessagePrompt}` — prompt is **only the latest user/developer turn**, never full history.
 - Response must carry non-empty `modelUid` + `assignmentJwt`; if the server echoes a router uid back → **fail the turn** (no fallback — router uid is not a legal `chatModelUid`).
 - The assigned uid + JWT bind to the same `cascadeId` in `GetChatMessage`.
+
+### 4.3 Effort routing (logical variant families)
+
+The registry collapses each effort-tier sibling into one logical model
+(`swe-2`, `claude-opus-5`, …) carrying `effortRouting` / `defaultMember` /
+`efforts` / `requiresEffort` (ported verbatim from oh-my-pi's `_collapse.kdl`
+devin section). Before any payload is built:
+
+- **Effort source**: `body.reasoning_effort` → `body.reasoning.effort` →
+  `body.output_config.effort` (Claude-source) → `body.thinking.type ===
+  "disabled"` → `off`; the `model(level)` suffix (`dv/swe-2(max)`) is the
+  inline override when the body carries nothing. `none` normalizes to `off`.
+- **Id normalization**: `resolveModelId` strips the `(level)` suffix and
+  resolves provider aliases (`swe`→`swe-1-7-lightning`, `opus`→`claude-opus-5`,
+  `sonnet`/`claude`→`claude-sonnet-5`, `haiku`→`claude-haiku-4-5`,
+  `gemini`→`gemini-3-7-flash`, `gpt`→`gpt-5-6-terra`, `codex`→`gpt-5-3-codex`,
+  plus dotted spellings `swe-1.7`→`swe-1-7`, `glm-5.2`→`glm-5-2`, …).
+- **Routing** (`resolveWireUid`): exact `effortRouting[effort]`, else the
+  nearest tier on the ladder `[off, minimal, low, medium, high, xhigh, max]`
+  (ties clamp to the lower tier), else `defaultMember`. `requiresEffort`
+  families have no off tier upstream — off/absent effort lands on
+  `defaultMember`, never a nonexistent `-none` uid.
+- **Routed member meta**: `disableParallelToolCalls` and the `maxTokens`
+  fallback resolve from the ROUTED member's registry entry (wire defaults
+  when the member has no row — members are upstream wire uids and need no
+  registry rows).
+- **Unchanged paths**: raw sibling ids and unknown ids pass through raw; the
+  `adaptive` router path keeps AssignModel keyed on the router uid.
 
 ---
 
@@ -190,19 +222,20 @@ Per-request auth: session token goes in `metadata.apiKey` (normalized with `devi
 
 ## 8. Models
 
-Static catalog in registry (24 entries); dashboard fetches the live lineup via `resolveDevinModels` → `GetCliModelConfigs` (filters `modelType === 2` CHAT, dedups by `modelUid`, exposes `creditMultiplier`, `contextLength`, `maxOutputTokens`, `supportsImages/Thinking/ToolCalls/ParallelToolCalls`, `modelRouter`, `family`, `isRecommended`).
+Static catalog in registry (60 entries: raw sibling uids + logical effort-routed families + legacy); dashboard fetches the live lineup via `resolveDevinModels` → `GetCliModelConfigs` (filters `modelType === 2` CHAT, dedups by `modelUid`, exposes `creditMultiplier`, `contextLength`, `maxOutputTokens`, `supportsImages/Thinking/ToolCalls/ParallelToolCalls`, `modelRouter`, `family`, `isRecommended`; collapsed families emit the same `effortRouting`/`defaultMember` shape).
 
 | Group | Ids | Notes |
 |---|---|---|
-| SWE-2 | `swe-2-high`, `swe-2-medium`, `swe-2-max` | 262k ctx, parallel tools |
-| SWE-1.7 | `swe-1-7`, `-medium`, `-lightning`, `-lightning-medium` | 262k / 202k (lightning) |
+| SWE-2 | logical `swe-2` + raw `swe-2-high/-medium/-max` | 262k ctx, parallel tools; `requiresEffort`, default `swe-2-high` |
+| SWE-1.7 | logical `swe-1-7`, `swe-1-7-lightning` + raw `-medium` siblings | 262k / 202k (lightning); ladder `medium`/`max` |
 | Router | `adaptive` | `modelRouter: true`, `maxOutputTokens: 64000` — resolves via AssignModel |
-| Third-party | `claude-opus-5-medium`, `claude-fable-5-1-medium`, `claude-sonnet-5-medium`, `gemini-3-8-flash-medium`, `gpt-5-6-sol/luna-medium`, `gpt-6-astra-medium`, `glm-5-2`, `glm-5-3-low/high/max`, `kimi-k3-high` | ACU-billed (`creditMultiplier`), no per-token metered rate |
+| Logical families | `claude-opus-5(-fast)`, `claude-fable-5`, `claude-sonnet-5`, `claude-opus-4-7/-4-8(-fast)`, `gpt-5-2`, `gpt-5-3-codex(-fast)`, `gpt-5-4(-fast/-mini)`, `gpt-5-5(-fast)`, `gpt-5-6-{luna,sol,terra}(-fast)`, `kimi-k3`, `grok-4-5/4-6`, `inkling`, `gemini-3-1-pro`, `gemini-3-{5,6,7}-flash`, `gemini-3-flash`, `glm-5-2-1m`, `deepseek-v4-{flash,pro}`, `nemotron-3-ultra`, `claude-haiku-4-5` | effort-routed (`effortRouting` → sibling uid, §4.3); members absent from the catalog are upstream wire uids |
+| Third-party raw | `claude-opus-5-medium`, `claude-fable-5-1-medium`, `claude-sonnet-5-medium`, `gemini-3-8-flash-medium`, `gpt-5-6-sol/luna-medium`, `gpt-6-astra-medium`, `glm-5-2`, `glm-5-3-low/high/max`, `kimi-k3-high` | ACU-billed (`creditMultiplier`), no per-token metered rate; `glm-5-2` doubles as a logical family id |
 | Legacy | `swe-check`, `swe-1-6`, `swe-1-6-fast` | Kept for existing combos; absent from current discovery |
 
-Unknown ids (not in registry) are treated as **concrete models** — direct chat lane, no AssignModel.
+Unknown ids (not in the registry and not a provider alias) are treated as **concrete models** — direct chat lane, no AssignModel, no effort routing (documented limitation: server-only families route raw until the static table is updated).
 
-Pricing: SWE models metered (`swe-2-high`: $0.75/$3.75 per Mtok); third-party entries are `0.00` — billed in ACUs on the Devin plan.
+Pricing: SWE models metered (`swe-2` family: $0.75/$3.75 per Mtok); third-party entries are `0.00` — billed in ACUs on the Devin plan (logical ids via the provider-scoped `PROVIDER_PRICING.devin` block so vendor-canonical rates never collide).
 
 ---
 
@@ -252,3 +285,4 @@ Pricing: SWE models metered (`swe-2-high`: $0.75/$3.75 per Mtok); third-party en
 8. Token exchange is JSON `{code, code_verifier}` with no `client_id`; callback is fixed port 59653.
 9. int32 fields decode via the 64-bit varint path (negative values sign-extend to 10-byte varints).
 10. `customApiServerUrl` only honored after `sanitizeCustomApiServerUrl` (https, no userinfo, no IP/localhost).
+11. `requiresEffort` families never emit a nonexistent `-none` uid — off/absent effort resolves to `defaultMember`; the `adaptive` router uid is still the only id that goes through AssignModel.

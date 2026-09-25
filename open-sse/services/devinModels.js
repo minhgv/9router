@@ -20,6 +20,7 @@ import {
   normalizeDevinSessionToken,
 } from "../utils/devinProtobuf.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
+import { collectDevinFamilyLane, devinDynamicFamilies } from "./devinFamilies.js";
 
 // Connect unary RPC headers, wire-captured from devin-cli: Basic auth with
 // the session token repeated on both sides of a `-` (Basic {token}-{token}).
@@ -43,16 +44,23 @@ function encodeCliModelConfigsRequest(sessionToken) {
  * semantic (displayOption MODEL_ROUTER or modelInfo.isModelRouter) and the
  * parallel-tool capability are preserved so execution metadata stays coherent
  * with the static registry.
+ *
+ * Server-declared model families (modelFamilyMetadata) are collapsed into one
+ * logical entry per family carrying `effortRouting` / `defaultMember` /
+ * `efforts` / `requiresEffort`; the members it replaces are removed from the
+ * output. Configs without family metadata stay standalone.
  */
 export function parseDevinModelConfigs(response) {
   const configs = Array.isArray(response?.clientModelConfigs) ? response.clientModelConfigs : [];
   const models = [];
   const seen = new Set();
+  const lanes = new Map();
   for (const cfg of configs) {
     const id = typeof cfg?.modelUid === "string" ? cfg.modelUid : "";
     if (!id || seen.has(id)) continue;
     if (cfg?.modelInfo?.modelType !== 2) continue; // CHAT only
     seen.add(id);
+    collectDevinFamilyLane(lanes, cfg, id);
     const features = cfg.modelInfo?.modelFeatures || {};
     models.push({
       id,
@@ -73,7 +81,50 @@ export function parseDevinModelConfigs(response) {
       ...(cfg.isRecommended ? { isRecommended: true } : {}),
     });
   }
-  return models;
+  return applyFamilyCollapse(models, devinDynamicFamilies(lanes.values()));
+}
+
+/**
+ * Replace family members with one logical entry per collapsed family. The
+ * logical entry inherits the default member's spec (features, credit
+ * multiplier, context/output caps, isRecommended, modelFamilyUid) and carries
+ * the effort routing table; with no server-declared default the first member
+ * is the base. Logical entries appear at the first member's position.
+ */
+function applyFamilyCollapse(models, families) {
+  if (families.length === 0) return models;
+  const familyByMember = new Map();
+  for (const family of families) {
+    for (const uid of family.members) familyByMember.set(uid, family);
+  }
+  const entryById = new Map(models.map((entry) => [entry.id, entry]));
+  const logicalByFamily = new Map();
+  for (const family of families) {
+    const baseId = family.defaultMember !== undefined ? family.defaultMember : family.members[0];
+    const base = entryById.get(baseId) || entryById.get(family.members[0]) || {};
+    logicalByFamily.set(family.id, {
+      ...base,
+      id: family.id,
+      name: family.name,
+      effortRouting: { ...family.routing },
+      ...(family.defaultMember !== undefined ? { defaultMember: family.defaultMember } : {}),
+      efforts: family.efforts,
+      requiresEffort: family.requiresEffort,
+    });
+  }
+  const collapsed = [];
+  const emitted = new Set();
+  for (const entry of models) {
+    const family = familyByMember.get(entry.id);
+    if (family === undefined) {
+      collapsed.push(entry);
+      continue;
+    }
+    if (emitted.has(family.id)) continue;
+    emitted.add(family.id);
+    collapsed.push(logicalByFamily.get(family.id));
+  }
+  return collapsed;
 }
 
 /**

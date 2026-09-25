@@ -41,6 +41,39 @@ const PATTERN_THINKING = [
   { provider: "codex", pattern: "*gpt-5.6-sol*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
   { provider: "codex", pattern: "*gpt-5.6-terra*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
   { provider: "codex", pattern: "*gpt-5.6-luna*", levels: CODEX_GPT_5_6_LEVELS },
+  // Devin (dv) logical variant families — effort ladders from the collapsed
+  // registry table (oh-my-pi _collapse.kdl parity). "none" appears only for
+  // families with an off route (requiresEffort families omit it). Provider-
+  // scoped rows precede the generic *codex* catch-all so devin codex ids
+  // resolve here first.
+  { provider: "devin", pattern: "swe-2*",            levels: ["medium", "high", "max"] },
+  { provider: "devin", pattern: "swe-1-7*",          levels: ["medium", "max"] },
+  { provider: "devin", pattern: "claude-opus-5*",    levels: ["low", "medium", "high", "xhigh", "max"] },
+  { provider: "devin", pattern: "claude-fable-5*",   levels: ["low", "medium", "high", "xhigh", "max"] },
+  { provider: "devin", pattern: "claude-sonnet-5*",  levels: ["low", "medium", "high", "xhigh", "max"] },
+  { provider: "devin", pattern: "claude-opus-4-7*",  levels: ["low", "medium", "high", "xhigh", "max"] },
+  { provider: "devin", pattern: "claude-opus-4-8*",  levels: ["low", "medium", "high", "xhigh", "max"] },
+  { provider: "devin", pattern: "gpt-5-2*",          levels: ["none", "low", "medium", "high", "xhigh"] },
+  { provider: "devin", pattern: "gpt-5-3-codex*",    levels: ["low", "medium", "high", "xhigh"] },
+  { provider: "devin", pattern: "gpt-5-4-mini*",     levels: ["low", "medium", "high", "xhigh"] },
+  { provider: "devin", pattern: "gpt-5-4*",          levels: ["none", "low", "medium", "high", "xhigh"] },
+  { provider: "devin", pattern: "gpt-5-5*",          levels: ["none", "low", "medium", "high", "xhigh"] },
+  { provider: "devin", pattern: "gpt-5-6-luna*",     levels: ["none", "low", "medium", "high", "xhigh", "max"] },
+  { provider: "devin", pattern: "gpt-5-6-sol*",      levels: ["none", "low", "medium", "high", "xhigh", "max"] },
+  { provider: "devin", pattern: "gpt-5-6-terra*",    levels: ["none", "low", "medium", "high", "xhigh", "max"] },
+  { provider: "devin", pattern: "kimi-k3*",          levels: ["low", "high", "max"] },
+  { provider: "devin", pattern: "glm-5-2-1m*",       levels: ["none", "high", "xhigh"] },
+  { provider: "devin", pattern: "glm-5-2*",          levels: ["high", "xhigh"] },
+  { provider: "devin", pattern: "grok-4-5*",         levels: ["low", "medium", "high"] },
+  { provider: "devin", pattern: "grok-4-6*",         levels: ["low", "medium", "high", "xhigh"] },
+  { provider: "devin", pattern: "inkling*",          levels: ["none", "low", "medium", "high", "xhigh", "max"] },
+  { provider: "devin", pattern: "gemini-3-1-pro*",   levels: ["low", "high"] },
+  { provider: "devin", pattern: "gemini-3-5-flash*", levels: ["minimal", "low", "medium", "high"] },
+  { provider: "devin", pattern: "gemini-3-6-flash*", levels: ["minimal", "low", "medium", "high"] },
+  { provider: "devin", pattern: "gemini-3-7-flash*", levels: ["minimal", "low", "medium", "high"] },
+  { provider: "devin", pattern: "gemini-3-flash*",   levels: ["minimal", "low", "medium", "high"] },
+  { provider: "devin", pattern: "deepseek-v4-*",     levels: ["low", "high", "max"] },
+  { provider: "devin", pattern: "nemotron-3-ultra*", levels: ["none", "medium", "high"] },
   { pattern: "*codex*", levels: ["low", "medium", "high", "xhigh"] }, // codex cannot disable thinking
   { pattern: "*mimo*v2.6*", levels: ["none", "low", "medium", "high", "xhigh"] },
   // DeepSeek v4.* (Alibaba MaaS, probed live): effort low|medium|high|xhigh|max

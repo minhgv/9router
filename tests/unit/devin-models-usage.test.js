@@ -8,6 +8,7 @@ import {
 } from "../../open-sse/services/devinModels.js";
 import { parseDevinUserStatus, getDevinUsage } from "../../open-sse/services/usage/devin.js";
 import { getUsageForProvider } from "../../open-sse/services/usage.js";
+import { collapseDevinFamilies } from "../../open-sse/services/devinFamilies.js";
 import {
   toBinary,
   GetCliModelConfigsResponseSchema,
@@ -253,5 +254,312 @@ describe("devin usage handler", () => {
     // Empty token short-circuits inside the handler without touching network.
     const out = await getUsageForProvider({ provider: "devin", accessToken: "", apiKey: "" });
     expect(out.message).toMatch(/session token/i);
+  });
+});
+
+describe("devin family collapse", () => {
+  const effortEntry = (name, order = 2) => ({ key: "reasoning effort", value: { order, name } });
+
+  function familyMember({
+    uid,
+    label,
+    familyLabel,
+    entries,
+    configDefault = false,
+    metadataDefault = false,
+    modelType = 2,
+    modelFamilyUid,
+    features = {},
+    maxTokens,
+    maxOutputTokens,
+    creditMultiplier,
+    isRecommended = false,
+  }) {
+    return {
+      label,
+      modelUid: uid,
+      ...(configDefault ? { isDefaultModelInFamily: true } : {}),
+      ...(creditMultiplier !== undefined ? { creditMultiplier } : {}),
+      ...(isRecommended ? { isRecommended: true } : {}),
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      modelInfo: {
+        modelType,
+        ...(modelFamilyUid ? { modelFamilyUid } : {}),
+        ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+        modelFeatures: features,
+      },
+      modelFamilyMetadata: {
+        modelFamilyLabel: familyLabel,
+        ...(metadataDefault ? { isDefaultModelInFamily: true } : {}),
+        entries,
+      },
+    };
+  }
+
+  it("collapses a swe-2 effort family into one logical entry with routing", () => {
+    const models = parseDevinModelConfigs({
+      clientModelConfigs: [
+        familyMember({ uid: "swe-2-medium", label: "SWE-2 Medium", familyLabel: "SWE-2", entries: [effortEntry("Medium", 2)], modelFamilyUid: "swe-2" }),
+        familyMember({ uid: "swe-2-high", label: "SWE-2 High", familyLabel: "SWE-2", entries: [effortEntry("High", 3)], configDefault: true, modelFamilyUid: "swe-2" }),
+        familyMember({ uid: "swe-2-max", label: "SWE-2 Max", familyLabel: "SWE-2", entries: [effortEntry("Max", 4)], modelFamilyUid: "swe-2" }),
+      ],
+    });
+
+    expect(models).toHaveLength(1);
+    expect(models[0]).toEqual({
+      id: "swe-2",
+      name: "SWE-2",
+      effortRouting: { medium: "swe-2-medium", high: "swe-2-high", max: "swe-2-max" },
+      defaultMember: "swe-2-high",
+      efforts: ["medium", "high", "max"],
+      requiresEffort: true,
+      family: "swe-2",
+    });
+  });
+
+  it("hoists the server-default member and recovers defaultLevel", () => {
+    const families = collapseDevinFamilies([
+      familyMember({ uid: "swe-2-medium", label: "SWE-2 Medium", familyLabel: "SWE-2", entries: [effortEntry("Medium", 2)] }),
+      familyMember({ uid: "swe-2-max", label: "SWE-2 Max", familyLabel: "SWE-2", entries: [effortEntry("Max", 4)] }),
+      familyMember({ uid: "swe-2-high", label: "SWE-2 High", familyLabel: "SWE-2", entries: [effortEntry("High", 3)], configDefault: true }),
+    ]);
+
+    expect(families).toHaveLength(1);
+    expect(families[0].id).toBe("swe-2");
+    // default member hoisted to the front of the server filing order
+    expect(families[0].members).toEqual(["swe-2-high", "swe-2-medium", "swe-2-max"]);
+    expect(families[0].defaultMember).toBe("swe-2-high");
+    expect(families[0].defaultLevel).toBe("high");
+    expect(families[0].requiresEffort).toBe(true);
+  });
+
+  it("honors metadata-level isDefaultModelInFamily and survives its absence", () => {
+    const withMetadataDefault = collapseDevinFamilies([
+      familyMember({ uid: "a-med", label: "Lambda Med", familyLabel: "Lambda", entries: [effortEntry("Medium", 2)] }),
+      familyMember({ uid: "a-high", label: "Lambda High", familyLabel: "Lambda", entries: [effortEntry("High", 3)], metadataDefault: true }),
+    ]);
+    expect(withMetadataDefault[0].defaultMember).toBe("a-high");
+    expect(withMetadataDefault[0].defaultLevel).toBe("high");
+
+    const withoutDefault = collapseDevinFamilies([
+      familyMember({ uid: "b-med", label: "Mu Med", familyLabel: "Mu", entries: [effortEntry("Medium", 2)] }),
+      familyMember({ uid: "b-high", label: "Mu High", familyLabel: "Mu", entries: [effortEntry("High", 3)] }),
+    ]);
+    expect(withoutDefault[0].defaultMember).toBeUndefined();
+    expect(withoutDefault[0].defaultLevel).toBeUndefined();
+    expect(withoutDefault[0].members).toEqual(["b-med", "b-high"]);
+  });
+
+  it("keeps the first claim on duplicate effort names", () => {
+    const families = collapseDevinFamilies([
+      familyMember({ uid: "first", label: "Nu High", familyLabel: "Nu", entries: [effortEntry("High", 3)] }),
+      familyMember({ uid: "second", label: "Nu High Too", familyLabel: "Nu", entries: [effortEntry("High", 3)] }),
+    ]);
+    expect(families[0].routing).toEqual({ high: "first" });
+    expect(families[0].members).toContain("second");
+  });
+
+  it("splits fast mode and 1m context into distinct lanes", () => {
+    const models = parseDevinModelConfigs({
+      clientModelConfigs: [
+        familyMember({ uid: "swe-2", label: "SWE-2", familyLabel: "SWE-2", entries: [effortEntry("High", 3)] }),
+        familyMember({ uid: "swe-2-fast", label: "SWE-2", familyLabel: "SWE-2", entries: [effortEntry("High", 3), { key: "fast mode", value: { order: 1, name: "Fast" } }] }),
+        familyMember({ uid: "swe-2-1m", label: "SWE-2", familyLabel: "SWE-2", entries: [effortEntry("High", 3), { key: "1m context", value: { order: 1, name: "1M" } }] }),
+        // fast mode with a non-1 order stays on the base lane
+        familyMember({ uid: "swe-2-slow", label: "SWE-2", familyLabel: "SWE-2", entries: [effortEntry("Max", 4), { key: "fast mode", value: { order: 2, name: "Slow" } }] }),
+      ],
+    });
+
+    expect(models.map((m) => m.id)).toEqual(["swe-2", "swe-2-fast", "swe-2-1m"]);
+    const byId = Object.fromEntries(models.map((m) => [m.id, m]));
+    expect(byId["swe-2"].name).toBe("SWE-2");
+    expect(byId["swe-2"].effortRouting).toEqual({ high: "swe-2", max: "swe-2-slow" });
+    expect(byId["swe-2-fast"].name).toBe("SWE-2 Fast");
+    expect(byId["swe-2-1m"].name).toBe("SWE-2 1M");
+  });
+
+  it("routes the shared-label non-thinking twin to off via the thinking axis", () => {
+    const models = parseDevinModelConfigs({
+      clientModelConfigs: [
+        familyMember({
+          uid: "claude-high",
+          label: "Claude Sonnet 5 High",
+          familyLabel: "Claude Sonnet 5",
+          entries: [effortEntry("High", 3), { key: "thinking", value: { order: 1, name: "Thinking" } }],
+        }),
+        familyMember({
+          uid: "claude-high-nt",
+          label: "Claude Sonnet 5 High",
+          familyLabel: "Claude Sonnet 5",
+          entries: [effortEntry("High", 3), { key: "thinking", value: { order: 2, name: "No Thinking" } }],
+        }),
+      ],
+    });
+
+    expect(models.map((m) => m.id)).toEqual(["claude-sonnet-5"]);
+    expect(models[0].effortRouting).toEqual({ off: "claude-high-nt", high: "claude-high" });
+    expect(models[0].efforts).toEqual(["high"]);
+    expect(models[0].requiresEffort).toBe(false);
+  });
+
+  it("normalizes effort names across punctuation and case", () => {
+    const families = collapseDevinFamilies([
+      familyMember({ uid: "xh-1", label: "Alpha XH", familyLabel: "Alpha", entries: [{ key: "effort", value: { order: 2, name: "X High" } }] }),
+      familyMember({ uid: "xh-2", label: "Beta XH", familyLabel: "Beta", entries: [{ key: "effort", value: { order: 2, name: "XHigh" } }] }),
+      familyMember({ uid: "xh-3", label: "Gamma XH", familyLabel: "Gamma", entries: [{ key: "effort", value: { order: 2, name: "x-high" } }] }),
+      // off spellings: only an off route -> not collapsed, stays standalone
+      familyMember({ uid: "off-1", label: "Delta NT", familyLabel: "Delta", entries: [{ key: "effort", value: { order: 2, name: "none" } }] }),
+      familyMember({ uid: "off-2", label: "Epsilon NT", familyLabel: "Epsilon", entries: [{ key: "effort", value: { order: 2, name: "No Thinking" } }] }),
+    ]);
+
+    const routingById = Object.fromEntries(families.map((f) => [f.id, f.routing]));
+    expect(routingById["alpha"]).toEqual({ xhigh: "xh-1" });
+    expect(routingById["beta"]).toEqual({ xhigh: "xh-2" });
+    expect(routingById["gamma"]).toEqual({ xhigh: "xh-3" });
+    expect(routingById["delta"]).toBeUndefined();
+    expect(routingById["epsilon"]).toBeUndefined();
+  });
+
+  it("keeps members with unknown effort names routeless but filed", () => {
+    const configs = [
+      familyMember({ uid: "omicron-turbo", label: "Omicron Turbo", familyLabel: "Omicron", entries: [{ key: "effort", value: { order: 2, name: "Turbo" } }] }),
+      familyMember({ uid: "omicron-high", label: "Omicron High", familyLabel: "Omicron", entries: [effortEntry("High", 3)] }),
+    ];
+    const models = parseDevinModelConfigs({ clientModelConfigs: configs });
+    expect(models.map((m) => m.id)).toEqual(["omicron"]);
+
+    const [family] = collapseDevinFamilies(configs);
+    expect(family.routing).toEqual({ high: "omicron-high" });
+    expect(family.members).toEqual(expect.arrayContaining(["omicron-turbo", "omicron-high"]));
+  });
+
+  it("normalizes effort axis keys across case and punctuation", () => {
+    const models = parseDevinModelConfigs({
+      clientModelConfigs: [
+        familyMember({ uid: "k-1", label: "Pi High", familyLabel: "Pi", entries: [{ key: "Reasoning Effort", value: { order: 2, name: "High" } }] }),
+        familyMember({ uid: "k-2", label: "Rho High", familyLabel: "Rho", entries: [{ key: "reasoning-effort!!", value: { order: 2, name: "High" } }] }),
+        familyMember({ uid: "k-3", label: "Sigma Max", familyLabel: "Sigma", entries: [{ key: "EFFORT", value: { order: 2, name: "Max" } }] }),
+      ],
+    });
+
+    const byId = Object.fromEntries(models.map((m) => [m.id, m]));
+    expect(byId["pi"].effortRouting).toEqual({ high: "k-1" });
+    expect(byId["rho"].effortRouting).toEqual({ high: "k-2" });
+    expect(byId["sigma"].effortRouting).toEqual({ max: "k-3" });
+  });
+
+  it("leaves lanes with only an off route standalone", () => {
+    const models = parseDevinModelConfigs({
+      clientModelConfigs: [
+        familyMember({ uid: "solo-nt", label: "Tau", familyLabel: "Tau", entries: [{ key: "effort", value: { order: 2, name: "none" } }] }),
+      ],
+    });
+    expect(models.map((m) => m.id)).toEqual(["solo-nt"]);
+    expect(models[0].effortRouting).toBeUndefined();
+  });
+
+  it("normalizes family labels to logical ids and skips empty labels", () => {
+    const models = parseDevinModelConfigs({
+      clientModelConfigs: [
+        familyMember({ uid: "gpt-sol", label: "GPT-5.6 Sol High", familyLabel: "GPT-5.6 Sol", entries: [effortEntry("High", 3)] }),
+        familyMember({ uid: "anon", label: "No Family", familyLabel: "   ", entries: [effortEntry("High", 3)] }),
+      ],
+    });
+    expect(models.map((m) => m.id)).toEqual(["gpt-5-6-sol", "anon"]);
+  });
+
+  it("inherits the default member's features and caps on the logical entry", () => {
+    const models = parseDevinModelConfigs({
+      clientModelConfigs: [
+        familyMember({
+          uid: "phi-low",
+          label: "Phi Low",
+          familyLabel: "Phi",
+          entries: [{ key: "effort", value: { order: 2, name: "Low" } }],
+          features: { supportsImages: true },
+        }),
+        familyMember({
+          uid: "phi-high",
+          label: "Phi High",
+          familyLabel: "Phi",
+          entries: [effortEntry("High", 3)],
+          configDefault: true,
+          modelFamilyUid: "phi-uid",
+          features: { supportsThinking: true, supportsParallelToolCalls: true, supportsToolCalls: false },
+          maxTokens: 262000,
+          maxOutputTokens: 128000,
+          creditMultiplier: 9,
+          isRecommended: true,
+        }),
+      ],
+    });
+
+    expect(models).toHaveLength(1);
+    expect(models[0]).toEqual({
+      id: "phi",
+      name: "Phi",
+      contextLength: 262000,
+      maxOutputTokens: 128000,
+      creditMultiplier: 9,
+      supportsThinking: true,
+      supportsParallelToolCalls: true,
+      supportsToolCalls: false,
+      family: "phi-uid",
+      isRecommended: true,
+      effortRouting: { low: "phi-low", high: "phi-high" },
+      defaultMember: "phi-high",
+      efforts: ["low", "high"],
+      requiresEffort: true,
+    });
+  });
+
+  it("filters non-chat members before collapse and leaves routers untouched", () => {
+    const models = parseDevinModelConfigs({
+      clientModelConfigs: [
+        { label: "Adaptive", modelUid: "adaptive", modelInfo: { modelType: 2, displayOption: 3 } },
+        familyMember({ uid: "chi-high", label: "Chi High", familyLabel: "Chi", entries: [effortEntry("High", 3)] }),
+        familyMember({ uid: "chi-max", label: "Chi Max", familyLabel: "Chi", entries: [effortEntry("Max", 4)] }),
+        familyMember({ uid: "chi-embed", label: "Chi Embed", familyLabel: "Chi", entries: [effortEntry("Low", 2)], modelType: 3 }),
+      ],
+    });
+
+    expect(models.map((m) => m.id)).toEqual(["adaptive", "chi"]);
+    expect(models[0].modelRouter).toBe(true);
+    expect(models[1].effortRouting).toEqual({ high: "chi-high", max: "chi-max" });
+  });
+
+  it("dedupes model uids before filing family lanes", () => {
+    const models = parseDevinModelConfigs({
+      clientModelConfigs: [
+        familyMember({ uid: "psi-high", label: "Psi High", familyLabel: "Psi", entries: [effortEntry("High", 3)] }),
+        // duplicate uid is dropped by the seen-set before it could claim "max"
+        { label: "Psi High dupe", modelUid: "psi-high", modelInfo: { modelType: 2 }, modelFamilyMetadata: { modelFamilyLabel: "Psi", entries: [effortEntry("Max", 4)] } },
+      ],
+    });
+    expect(models.map((m) => m.id)).toEqual(["psi"]);
+    expect(models[0].effortRouting).toEqual({ high: "psi-high" });
+  });
+
+  it("collapses families from a protobuf-encoded discovery response", async () => {
+    const wire = {
+      clientModelConfigs: [
+        familyMember({ uid: "swe-2-medium", label: "SWE-2 Medium", familyLabel: "SWE-2", entries: [effortEntry("Medium", 2)], modelFamilyUid: "swe-2", features: { supportsToolCalls: true } }),
+        familyMember({ uid: "swe-2-high", label: "SWE-2 High", familyLabel: "SWE-2", entries: [effortEntry("High", 3)], configDefault: true, modelFamilyUid: "swe-2", features: { supportsThinking: true } }),
+        familyMember({ uid: "swe-2-max", label: "SWE-2 Max", familyLabel: "SWE-2", entries: [effortEntry("Max", 4)], modelFamilyUid: "swe-2", features: { supportsToolCalls: true } }),
+      ],
+    };
+    const fetchFn = vi.fn().mockResolvedValue(protobufResponse(GetCliModelConfigsResponseSchema, wire));
+
+    const decoded = await fetchDevinCliModelConfigs(SESSION_TOKEN, { fetchFn });
+    const models = parseDevinModelConfigs(decoded);
+
+    expect(models.map((m) => m.id)).toEqual(["swe-2"]);
+    expect(models[0]).toMatchObject({
+      name: "SWE-2",
+      defaultMember: "swe-2-high",
+      requiresEffort: true,
+      supportsThinking: true,
+      effortRouting: { medium: "swe-2-medium", high: "swe-2-high", max: "swe-2-max" },
+    });
   });
 });

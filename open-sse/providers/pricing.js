@@ -136,6 +136,8 @@ export const MODEL_PRICING = {
   // === Devin (Cognition) — Cascade swe models ===
   // Metered Enterprise rates per model. Pro plan: swe-2 variants, swe-1-7 variants
   // (non-lightning), and swe-check are included (no metered cost beyond plan credits).
+  // "swe-2" is the logical effort-routed family id (siblings are its tiers).
+  "swe-2":                        { input: 0.75, output: 3.75,  cached: 0.075 },
   "swe-2-high":                   { input: 0.75, output: 3.75,  cached: 0.075 },
   "swe-2-medium":                 { input: 0.75, output: 3.75,  cached: 0.075 },
   "swe-2-max":                    { input: 0.75, output: 3.75,  cached: 0.075 },
@@ -182,6 +184,48 @@ export const MODEL_PRICING = {
  * Keyed by provider alias (cc, cx, gc, gh, ...) or provider id (openai, anthropic, ...).
  */
 export const PROVIDER_PRICING = {
+  // Devin (dv) logical variant-family ids — ACU-billed on the Devin plan (no
+  // per-token metered rate). Provider-scoped because these ids collide with
+  // the vendors' own canonical models (a 0.00 MODEL_PRICING row would zero
+  // out e.g. anthropic claude-opus-5 / official deepseek-v4-pro).
+  devin: {
+    "claude-opus-5":        { input: 0.00, output: 0.00, cached: 0.00 },
+    "claude-opus-5-fast":   { input: 0.00, output: 0.00, cached: 0.00 },
+    "claude-fable-5":       { input: 0.00, output: 0.00, cached: 0.00 },
+    "claude-sonnet-5":      { input: 0.00, output: 0.00, cached: 0.00 },
+    "claude-opus-4-7":      { input: 0.00, output: 0.00, cached: 0.00 },
+    "claude-opus-4-7-fast": { input: 0.00, output: 0.00, cached: 0.00 },
+    "claude-opus-4-8":      { input: 0.00, output: 0.00, cached: 0.00 },
+    "claude-opus-4-8-fast": { input: 0.00, output: 0.00, cached: 0.00 },
+    "claude-haiku-4-5":     { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-2":              { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-3-codex":        { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-3-codex-fast":   { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-4":              { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-4-fast":         { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-4-mini":         { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-5":              { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-5-fast":         { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-6-luna":         { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-6-luna-fast":    { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-6-sol":          { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-6-sol-fast":     { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-6-terra":        { input: 0.00, output: 0.00, cached: 0.00 },
+    "gpt-5-6-terra-fast":   { input: 0.00, output: 0.00, cached: 0.00 },
+    "kimi-k3":              { input: 0.00, output: 0.00, cached: 0.00 },
+    "grok-4-5":             { input: 0.00, output: 0.00, cached: 0.00 },
+    "grok-4-6":             { input: 0.00, output: 0.00, cached: 0.00 },
+    "inkling":              { input: 0.00, output: 0.00, cached: 0.00 },
+    "gemini-3-1-pro":       { input: 0.00, output: 0.00, cached: 0.00 },
+    "gemini-3-5-flash":     { input: 0.00, output: 0.00, cached: 0.00 },
+    "gemini-3-6-flash":     { input: 0.00, output: 0.00, cached: 0.00 },
+    "gemini-3-flash":       { input: 0.00, output: 0.00, cached: 0.00 },
+    "gemini-3-7-flash":     { input: 0.00, output: 0.00, cached: 0.00 },
+    "glm-5-2-1m":           { input: 0.00, output: 0.00, cached: 0.00 },
+    "deepseek-v4-flash":    { input: 0.00, output: 0.00, cached: 0.00 },
+    "deepseek-v4-pro":      { input: 0.00, output: 0.00, cached: 0.00 },
+    "nemotron-3-ultra":     { input: 0.00, output: 0.00, cached: 0.00 },
+  },
   // GitHub Copilot (gh) — explicit override, matches canonical gpt-5.3-codex rate
   gh: {
     "gpt-5.3-codex": { input: 1.75, output: 14.00, cached: 0.175, reasoning: 14.00, cache_creation: 1.75 },

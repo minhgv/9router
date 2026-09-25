@@ -1090,6 +1090,25 @@
   },
   "devin": {
     "baseUrl": "https://server.codeium.com",
-    "format": "openai"
+    "format": "openai",
+    "providerAliases": {
+      "swe": "swe-1-7-lightning",
+      "opus": "claude-opus-5",
+      "sonnet": "claude-sonnet-5",
+      "claude": "claude-sonnet-5",
+      "haiku": "claude-haiku-4-5",
+      "gemini": "gemini-3-7-flash",
+      "gpt": "gpt-5-6-terra",
+      "codex": "gpt-5-3-codex",
+      "claude-haiku-4.5": "claude-haiku-4-5",
+      "gemini-3.7-flash": "gemini-3-7-flash",
+      "glm-5.2": "glm-5-2",
+      "gpt-5.6-luna": "gpt-5-6-luna",
+      "gpt-5.6-sol": "gpt-5-6-sol",
+      "gpt-5.6-terra": "gpt-5-6-terra",
+      "grok-4.6": "grok-4-6",
+      "swe-1.7": "swe-1-7",
+      "swe-1.7-lightning": "swe-1-7-lightning"
+    }
   }
 }

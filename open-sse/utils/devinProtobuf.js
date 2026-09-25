@@ -1014,11 +1014,27 @@ export const ModelInfoSchema = {
   ],
 };
 
+export const ModelFamilyMetadataValueSchema = {
+  typeName: "exa.codeium_common_pb.ModelFamilyMetadataValue",
+  fields: [
+    { no: 1, name: "order", kind: "int32" },
+    { no: 2, name: "name", kind: "string" },
+  ],
+};
+
+export const ModelFamilyMetadataEntrySchema = {
+  typeName: "exa.codeium_common_pb.ModelFamilyMetadataEntry",
+  fields: [
+    { no: 1, name: "key", kind: "string" },
+    { no: 2, name: "value", kind: "message", T: () => ModelFamilyMetadataValueSchema },
+  ],
+};
+
 export const ModelFamilyMetadataSchema = {
   typeName: "exa.codeium_common_pb.ModelFamilyMetadata",
-  // row 2 entries (ModelFamilyMetadataEntrySchema) omitted — skipped as unknown on the wire.
   fields: [
     { no: 1, name: "modelFamilyLabel", kind: "string" },
+    { no: 2, name: "entries", kind: "message", T: () => ModelFamilyMetadataEntrySchema, repeat: true },
     { no: 3, name: "isDefaultModelInFamily", kind: "bool" },
   ],
 };

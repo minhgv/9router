@@ -1,6 +1,7 @@
 # Unreleased
 
 ## Features
+- **Devin**: collapse effort-tier siblings into logical variant models (`swe-2`, `claude-opus-5`, `gpt-5-6-terra`, … — 40 families ported from oh-my-pi's taxonomy) — `reasoning_effort` (`reasoning.effort` / `output_config.effort`), the `model(level)` suffix and short/dotted provider aliases (`dv/swe`, `swe-1.7`, `opus`) route to the sibling wire uid at request time with nearest-tier clamping; `requiresEffort` families land on the recommended default member instead of a nonexistent `-none` uid; raw sibling ids stay valid; per-family capabilities, pricing rows and thinking-level ladders added (`thinkingCanDisable:false` only where no off route exists)
 - **Usage**: add Cache Ratio column to the usage table (tokens view) — shows `cachedTokens / promptTokens` as a percentage per model/account/API key/endpoint, sortable via the column header
 
 ## Security

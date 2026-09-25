@@ -176,14 +176,23 @@ function startDiscovery(key, credentials, options = {}) {
   const baseEpoch = keyEpochs.get(key) ?? 0;
   const timeoutSignal = AbortSignal.timeout(DISCOVERY_TIMEOUT_MS);
   const controller = new AbortController();
-  const waiterSignals = new Set();
+  const waiterSignals = new Set(); // live signal-carrying waiters only
+  let unboundedWaiters = 0;        // signal-less waiters (cannot abort)
   const onTimeout = () => controller.abort();
   timeoutSignal.addEventListener("abort", onTimeout, { once: true });
+  // Abort the shared fetch only once every live waiter is gone; a signal-less
+  // waiter keeps it alive, and pruned waiterSignals can't be double-counted.
   const abortWhenUnwatched = () => {
+    if (unboundedWaiters > 0) return;
     for (const signal of waiterSignals) if (!signal.aborted) return;
     controller.abort();
   };
-  const record = { waiterSignals, abortWhenUnwatched };
+  const record = {
+    waiterSignals,
+    abortWhenUnwatched,
+    addUnboundedWaiter: () => { unboundedWaiters++; },
+    removeUnboundedWaiter: () => { unboundedWaiters--; },
+  };
   record.promise = (async () => {
     try {
       const token = credentials?.accessToken || credentials?.apiKey || "";
@@ -214,22 +223,30 @@ function startDiscovery(key, credentials, options = {}) {
  */
 function joinDiscovery(record, signal) {
   if (signal) {
+    if (signal.aborted) return Promise.resolve(null);
     record.waiterSignals.add(signal);
-    if (signal.aborted) {
-      record.abortWhenUnwatched();
-      return Promise.resolve(null);
-    }
-    signal.addEventListener("abort", record.abortWhenUnwatched, { once: true });
+  } else {
+    record.addUnboundedWaiter();
   }
+  let onAbort = null;
+  const finish = (resolve, snapshot) => {
+    if (signal) {
+      signal.removeEventListener("abort", onAbort);
+      record.waiterSignals.delete(signal);
+    } else {
+      record.removeUnboundedWaiter();
+    }
+    resolve(snapshot);
+  };
   return new Promise((resolve) => {
-    const onAbort = () => resolve(null);
-    if (signal?.aborted) return resolve(null);
+    onAbort = () => {
+      // Prune self first so abortWhenUnwatched sees only live waiters, then
+      // let the record decide whether the shared fetch is orphaned.
+      finish(resolve, null);
+      record.abortWhenUnwatched();
+    };
     if (signal) signal.addEventListener("abort", onAbort, { once: true });
-    record.promise.then((snapshot) => {
-      signal?.removeEventListener("abort", onAbort);
-      signal?.removeEventListener("abort", record.abortWhenUnwatched);
-      resolve(snapshot);
-    });
+    record.promise.then((snapshot) => finish(resolve, snapshot));
   });
 }
 

@@ -112,6 +112,7 @@ W1 ∥ W2 with locked contract (snapshot shape + `getDevinCatalogSnapshot` signa
 - [x] T-06 (main→AC-12): wire `invalidateDevinCatalog` into PUT/DELETE `/api/providers/[id]` for devin connections. → also wired provider-nodes bulk delete; route tests in devin-catalog-invalidation.test.js.
 - [x] T-07 (main): update `docs/DEVIN.md` — catalog layer, cache key scope, TTL/SWR, resolveWireUid fallback chain.
 - [x] T-08 (repair): reviewer blocker — epoch-fence publishes vs invalidation (keyEpochs in devinCatalog.js; baseEpoch forwarded from resolveDevinModels pre-fetch); joinDiscovery listener detach; AC-12 route test.
+- [x] T-09 (repair): post-delivery nit — signal-less waiters counted in `startDiscovery` (`unboundedWaiters`); `joinDiscovery` prunes waiter membership on ANY settlement (single `onAbort`, abort path calls `abortWhenUnwatched` after self-prune). Regression test `c-mixed-waiters` proven fail-before/pass-after.
 
 ## Edge-case test matrix
 
@@ -147,6 +148,8 @@ Cleanup (T-02):
 - T-03 (W2Executor): devin-executor.test.js 75/75; six-suite sweep 154/154; AC-01/05/06/07. Deviation: snapshot family `routing` → `effortRouting` shallow-copy normalization in resolveModelMeta (locked shape uses `routing`). Sibling test files (contracts, dns-security) pinned catalog mock after real module landed.
 - T-05 (TRVerify/TRVerify2): pre-repair 205 green + eslint clean; post-repair 211 green (8 files) + eslint clean.
 - Review (RevCatalog): overall incorrect → 1 BLOCKER (invalidation didn't fence in-flight publishes — orphan cold discovery could re-poison cache post-invalidate and reject the fresh refresh), 2 nits (joinDiscovery listener leak; AC-12 untested). Repair pass (RepairEpoch): keyEpochs fence + epoch forwarded from resolveDevinModels pre-fetch + listener detach + 4 route tests + 2 fence regression tests — both proven fail-before/pass-after. Per-AC: all PASS.
+- T-09 (post-delivery nit): `joinDiscovery` previously left aborted signals in `waiterSignals` and treated signal-less cold callers as non-watchers — a co-waiter's abort could kill the shared fetch under a live signal-less waiter. Fix: `unboundedWaiters` counter + `finish()` prunes membership on any settlement. `tests/unit/devin-catalog.test.js` now 19 tests; full devin suite 226/226 green, eslint clean.
+
 ## Assumptions and contingencies
 
 - `credentials.connectionId` and `credentials.providerSpecificData.apiBaseUrl` are present in executor context (verified chatCore.js:239,336-339).

@@ -405,6 +405,22 @@ describe("devin catalog service", () => {
     invalidateDevinCatalog("c-abort");
   });
 
+  it("keeps the shared fetch alive for a signal-less waiter when a co-waiter aborts", async () => {
+    invalidateDevinCatalog("c-mixed-waiters");
+    const fetchFn = deferredFetch();
+    const controller = new AbortController();
+    const withSignal = getDevinCatalogSnapshot(credsFor("c-mixed-waiters"), { fetchFn, signal: controller.signal });
+    const withoutSignal = getDevinCatalogSnapshot(credsFor("c-mixed-waiters"), { fetchFn });
+    controller.abort();
+    await expect(withSignal).resolves.toBeNull();
+    // The aborted waiter was pruned; the signal-less one still owns the fetch.
+    expect(fetchFn.mock.calls[0][1].signal.aborted).toBe(false);
+    fetchFn.resolveWith({ clientModelConfigs: [chatConfig("survivor")] });
+    const snapshot = await withoutSignal;
+    expect(snapshot.members.get("survivor")).toMatchObject({ id: "survivor" });
+    invalidateDevinCatalog("c-mixed-waiters");
+  });
+
   it("an already-aborted signal short-circuits to null without fetching (matrix 11)", async () => {
     invalidateDevinCatalog("c-aborted");
     const controller = new AbortController();

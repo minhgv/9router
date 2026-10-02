@@ -6,6 +6,7 @@ import { getUsageForProvider } from "open-sse/services/usage.js";
 import { getExecutor } from "open-sse/executors/index.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { USAGE_APIKEY_PROVIDERS } from "@/shared/constants/providers";
+import { isUnrecoverableRefreshError } from "open-sse/services/tokenRefresh.js";
 
 // Detect auth-expired messages returned by usage providers instead of throwing
 const AUTH_EXPIRED_PATTERNS = ["expired", "authentication", "unauthorized", "401", "re-authorize"];
@@ -21,6 +22,9 @@ function isAuthExpiredMessage(usage) {
  * @returns Promise<{ connection, refreshed: boolean }>
  */
 export async function refreshAndUpdateCredentials(connection, force = false, proxyOptions = null) {
+  const latest = connection.id ? await getProviderConnectionById(connection.id) : null;
+  if (latest) connection = latest;
+
   const executor = getExecutor(connection.provider);
 
   // Build credentials object from connection
@@ -46,6 +50,10 @@ export async function refreshAndUpdateCredentials(connection, force = false, pro
 
   // Use executor's refreshCredentials method (with optional proxy)
   const refreshResult = await executor.refreshCredentials(credentials, console, proxyOptions);
+  if (refreshResult && isUnrecoverableRefreshError(refreshResult)) {
+    throw new Error("Refresh token invalid or reused. Please re-authorize the connection.");
+  }
+
 
   if (!refreshResult) {
     // Refresh failed but we still have an accessToken — try with existing token

@@ -79,6 +79,13 @@ export function selectAnthropicBeta(model = "", body = null) {
   return flags.join(",");
 }
 
+export function mergeAnthropicBeta(...values) {
+  const flags = values.flatMap((value) => typeof value === "string" ? value.split(",") : [])
+    .map((flag) => flag.trim())
+    .filter(Boolean);
+  return [...new Set(flags)].join(",");
+}
+
 // Shared baseUrls
 export const KIMI_CODING_BASE_URL = "https://api.kimi.com/coding/v1/messages";
 

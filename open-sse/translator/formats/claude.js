@@ -31,7 +31,8 @@ export function hasValidContent(msg) {
       block.type === CLAUDE_BLOCK.TOOL_USE ||
       block.type === CLAUDE_BLOCK.TOOL_RESULT ||
       block.type === CLAUDE_BLOCK.IMAGE ||
-      block.type === CLAUDE_BLOCK.DOCUMENT);
+      block.type === CLAUDE_BLOCK.DOCUMENT ||
+      block.type === CLAUDE_BLOCK.CONTAINER_UPLOAD);
   }
   if (Array.isArray(msg.content)) {
     return msg.content.some(block =>
@@ -39,7 +40,8 @@ export function hasValidContent(msg) {
       block.type === CLAUDE_BLOCK.TOOL_USE ||
       block.type === CLAUDE_BLOCK.TOOL_RESULT ||
       block.type === CLAUDE_BLOCK.IMAGE ||
-      block.type === CLAUDE_BLOCK.DOCUMENT
+      block.type === CLAUDE_BLOCK.DOCUMENT ||
+      block.type === CLAUDE_BLOCK.CONTAINER_UPLOAD
     );
   }
   return false;
@@ -158,7 +160,17 @@ export function fixToolUseOrdering(messages) {
   return merged;
 }
 
-// Models that reject thinking.type "adaptive" + output_config.effort (Opus 4.5+/Sonnet 4.6+ only)
+// Restore a user turn after cleanup only when it would otherwise expose a
+// generated assistant tail; preserve an explicit client assistant prefill.
+const TRAILING_USER_PLACEHOLDER = "Continue.";
+
+export function ensureTrailingUserTurn(messages, originalLastRole) {
+  if (!Array.isArray(messages) || originalLastRole === ROLE.ASSISTANT) return messages;
+  if (messages[messages.length - 1]?.role !== ROLE.ASSISTANT) return messages;
+  return [...messages, { role: ROLE.USER, content: [{ type: CLAUDE_BLOCK.TEXT, text: TRAILING_USER_PLACEHOLDER }] }];
+}
+
+// Claude Haiku rejects adaptive thinking and output_config.effort.
 const ADAPTIVE_THINKING_UNSUPPORTED = /haiku/i;
 
 function handlesThinkingBlocks(provider) {
@@ -201,6 +213,7 @@ function hasForeignServerToolUseId(block) {
 // 5. server_tool_use blocks carrying a foreign (non-srvtoolu_) id → rejected outright
 export function normalizeClaudePassthrough(body, model = "") {
   if (!body || typeof body !== "object") return body;
+  const originalLastRole = Array.isArray(body.messages) ? body.messages[body.messages.length - 1]?.role : undefined;
 
   // 1. Downgrade adaptive thinking for models that don't support it
   if (body.thinking?.type === "adaptive" && ADAPTIVE_THINKING_UNSUPPORTED.test(model)) {
@@ -314,6 +327,7 @@ export function normalizeClaudePassthrough(body, model = "") {
         !(block?.type === CLAUDE_BLOCK.TEXT && !String(block.text ?? "").trim()));
       return msg.content.length > 0;
     });
+    body.messages = ensureTrailingUserTurn(body.messages, originalLastRole);
   }
 
   return body;
@@ -331,6 +345,14 @@ function markLastCacheableBlock(msg) {
     return true;
   }
   return false;
+}
+
+function markFinalToolResults(body) {
+  const final = body?.messages?.[body.messages.length - 1];
+  if (final?.role !== ROLE.USER || !Array.isArray(final.content)) return;
+  if (!final.content.some((block) => block?.type === CLAUDE_BLOCK.TOOL_RESULT)) return;
+  if (countCacheControlBlocks(body) >= 4) return;
+  markLastCacheableBlock(final);
 }
 
 // Re-anchor cache breakpoints on a Claude passthrough body (same policy as
@@ -402,6 +424,7 @@ export function anchorClaudeCache(body) {
         anchored = markLastCacheableBlock(body.messages[i]);
       }
     }
+    markFinalToolResults(body);
   }
 
   return body;
@@ -440,12 +463,24 @@ export function prepareClaudeRequest(body, provider = null, apiKey = null, conne
     delete body.output_config;
   }
 
+  const modelCaps = getCapabilitiesForModel(provider, body.model);
+  if (modelCaps.thinkingOff && body.thinking?.type === "disabled") {
+    body.thinking = { type: modelCaps.thinkingOff };
+    const effort = body.output_config?.effort;
+    if (effort === "xhigh" || effort === "max") body.output_config.effort = "high";
+  }
+  if (modelCaps.forcedToolChoice === false &&
+    (body.tool_choice?.type === "any" || body.tool_choice?.type === "tool")) {
+    const { disable_parallel_tool_use } = body.tool_choice;
+    body.tool_choice = { type: "auto", ...(disable_parallel_tool_use !== undefined ? { disable_parallel_tool_use } : {}) };
+  }
+
   // Clamp max_tokens to the model's real output ceiling. Models whose caps
   // declare a higher maxOutput (e.g. Opus 4.8 / Sonnet 4.6 = 128000) are allowed
   // up to it, so max-effort thinking gets full budget; others fall back to the
   // conservative 64000 default.
   if (body.max_tokens) {
-    const ceiling = getCapabilitiesForModel(provider, body.model).maxOutput || DEFAULT_MAX_TOKENS;
+    const ceiling = modelCaps.maxOutput || DEFAULT_MAX_TOKENS;
     if (body.max_tokens > ceiling) body.max_tokens = ceiling;
 
     // Reconcile against thinking budget. applyThinking (thinkingUnified.js) runs
@@ -477,6 +512,7 @@ export function prepareClaudeRequest(body, provider = null, apiKey = null, conne
   // 2. Messages: process in optimized passes
   if (body.messages && Array.isArray(body.messages)) {
     const len = body.messages.length;
+    const originalLastRole = body.messages[len - 1]?.role;
     let filtered = [];
 
     // Pass 1: remove cache_control + filter empty messages
@@ -501,6 +537,7 @@ export function prepareClaudeRequest(body, provider = null, apiKey = null, conne
     // Pass 1.5: Fix tool_use/tool_result ordering
     // Each tool_use must have tool_result in the NEXT message (not same message with other content)
     filtered = fixToolUseOrdering(filtered);
+    filtered = ensureTrailingUserTurn(filtered, originalLastRole);
 
     body.messages = filtered;
 
@@ -570,6 +607,8 @@ export function prepareClaudeRequest(body, provider = null, apiKey = null, conne
       }
     }
   }
+  // Tool and system anchors are installed below; reserve a remaining slot for
+  // the final tool-result turn only after those fixed breakpoints are in place.
 
   // 3. Tools: filter built-in tools for non-Anthropic providers, then handle cache_control
   if (body.tools && Array.isArray(body.tools)) {
@@ -639,5 +678,6 @@ export function prepareClaudeRequest(body, provider = null, apiKey = null, conne
   // is intentionally not applied — the fork's security epic removed fabricated
   // identity metadata (see CHANGELOG: "remove fabricated billing/identity
   // metadata and default decoy tools").
+  markFinalToolResults(body);
   return body;
 }

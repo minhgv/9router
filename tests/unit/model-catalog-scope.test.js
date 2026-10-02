@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -138,18 +138,19 @@ describe("catalog schema", () => {
   it("rebuilds an older-schema file instead of trusting its etag", async () => {
     fs.writeFileSync(catalogFile, JSON.stringify({ v: 1, etag: 'W/"old"', models: {}, providers: {} }));
     invalidateCatalog();
-    startModelCatalogSync();   // picks the file's etag + schema version back up
-
+    vi.useFakeTimers();
     const sent = [];
     const realFetch = globalThis.fetch;
     globalThis.fetch = async (_url, options) => {
       sent.push(options?.headers || {});
       return { ok: true, status: 200, headers: new Map([["etag", 'W/"new"']]), json: async () => upstream };
     };
+    startModelCatalogSync();   // restores the stale schema etag without running its timer
     try {
       expect((await syncModelCatalog()).status).toBe("updated");
     } finally {
       globalThis.fetch = realFetch;
+      vi.useRealTimers();
     }
     expect(sent[0]["if-none-match"]).toBeUndefined();
     const written = JSON.parse(fs.readFileSync(catalogFile, "utf8"));

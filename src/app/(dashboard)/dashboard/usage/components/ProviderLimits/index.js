@@ -100,6 +100,32 @@ function getCodexResetCreditCount(quota) {
   return Number.isFinite(count) ? Math.max(0, count) : 0;
 }
 
+function getClaudeResetGrantData(quota) {
+  const data = quota?.raw?.resetCredits;
+  return data && Array.isArray(data.grants) ? data : null;
+}
+
+const CLAUDE_RESET_LIMIT_NAMES = {
+  five_hour: "session",
+  seven_day: "weekly",
+  seven_day_overage_included: "weekly",
+  seven_day_opus: "Opus weekly",
+  seven_day_sonnet: "Sonnet weekly",
+};
+
+function formatClaudeResetClears(clears) {
+  const names = [...new Set((Array.isArray(clears) ? clears : []).map((key) => CLAUDE_RESET_LIMIT_NAMES[key]).filter(Boolean))];
+  return names.length ? `${names.join(" + ")} limits` : "limits";
+}
+
+function claudeGrantStatus(grant) {
+  if (grant.resetsLeft <= 0) return "used";
+  if (grant.paused) return "paused";
+  if (grant.endsAt && new Date(grant.endsAt).getTime() <= Date.now()) return "expired";
+  if (grant.usableNow) return "usable now";
+  if (grant.startsAt && new Date(grant.startsAt).getTime() > Date.now()) return "not started";
+  return grant.useRequiresLimit ? "at limit only" : "unavailable";
+}
 function providerLabel(providerId) {
   return AI_PROVIDERS[providerId]?.name || providerId;
 }
@@ -146,6 +172,8 @@ export default function ProviderLimits() {
   const [resettingLimitId, setResettingLimitId] = useState(null);
   const [resetConfirmState, setResetConfirmState] = useState(null);
   const [resetCreditsState, setResetCreditsState] = useState(null);
+  const [claudeResetGrantsState, setClaudeResetGrantsState] = useState(null);
+  const [claudeResetConfirmState, setClaudeResetConfirmState] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState(null);
   const [proxyPools, setProxyPools] = useState([]);
@@ -331,6 +359,30 @@ export default function ProviderLimits() {
     },
     [fetchQuota, resettingLimitId],
   );
+
+  const handleResetClaudeLimit = useCallback(async (connection, grantId) => {
+    if (connection?.provider !== "claude" || connection?.authType !== "oauth" || resettingLimitId) return;
+    setResettingLimitId(connection.id);
+    setErrors((prev) => ({ ...prev, [connection.id]: null }));
+    try {
+      const response = await fetch(`/api/usage/${connection.id}/claude-reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grantId }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message || result.error || "Failed to reset Claude limit");
+      }
+      setClaudeResetGrantsState(null);
+      await fetchQuota(connection.id, connection.provider, { force: true });
+      setLastUpdated(new Date());
+    } catch (error) {
+      setErrors((prev) => ({ ...prev, [connection.id]: error.message || "Failed to reset Claude limit" }));
+    } finally {
+      setResettingLimitId(null);
+    }
+  }, [fetchQuota, resettingLimitId]);
 
   const handleViewCodexResetCredits = useCallback(async (connection) => {
     setResetCreditsState({ connection, loading: true, error: null, data: null });
@@ -1056,6 +1108,10 @@ export default function ProviderLimits() {
           const isInactive = conn.isActive === false;
           const isCodex = conn.provider === "codex";
           const resetCreditCount = getCodexResetCreditCount(quota);
+          const claudeResetData = getClaudeResetGrantData(quota);
+          const claudeResetCount = Number.isFinite(Number(claudeResetData?.availableCount))
+            ? Math.max(0, Number(claudeResetData.availableCount))
+            : 0;
           const isResettingLimit = resettingLimitId === conn.id;
           const rowBusy = deletingId === conn.id || togglingId === conn.id || isResettingLimit;
           const rawQuotas = quota?.quotas || [];
@@ -1182,6 +1238,20 @@ export default function ProviderLimits() {
                           </button>
                         </Tooltip>
                       </>
+                    )}
+                    {conn.provider === "claude" && conn.authType === "oauth" && claudeResetData && (
+                      <Tooltip text={`Use one Claude limit reset. Available: ${claudeResetCount}`}>
+                        <button
+                          type="button"
+                          onClick={() => setClaudeResetGrantsState({ connection: conn, grants: claudeResetData.grants, resetData: claudeResetData })}
+                          disabled={isLoading || rowBusy}
+                          aria-label={`View ${claudeResetCount} available Claude limit resets`}
+                          className="flex h-8 min-w-10 items-center justify-center gap-1 rounded-lg border border-primary/30 bg-primary/5 px-2 text-[11px] font-medium tabular-nums text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">restart_alt</span>
+                          <span>{claudeResetCount}</span>
+                        </button>
+                      </Tooltip>
                     )}
                     {AUTO_PING_SETTINGS_KEYS[conn.provider] && conn.authType === "oauth" && (
                       <Tooltip text={AUTO_PING_TOOLTIPS[conn.provider]}>
@@ -1465,6 +1535,77 @@ export default function ProviderLimits() {
         loading={Boolean(resettingLimitId)}
       />
 
+      <ConfirmModal
+        isOpen={Boolean(claudeResetConfirmState)}
+        onClose={() => {
+          if (!resettingLimitId) setClaudeResetConfirmState(null);
+        }}
+        onConfirm={async () => {
+          const state = claudeResetConfirmState;
+          if (!state) return;
+          await handleResetClaudeLimit(state.connection, state.grant.id);
+          setClaudeResetConfirmState(null);
+        }}
+        title="Reset Claude limit?"
+        message={`Redeem ${claudeResetConfirmState?.grant?.label || "one free reset"} for ${getConnectionLabel(claudeResetConfirmState?.connection || {}) || "this account"}. This cannot be undone.`}
+        confirmText="Redeem reset"
+        cancelText="Cancel"
+        variant="danger"
+        loading={Boolean(resettingLimitId)}
+      />
+
+      {claudeResetGrantsState && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-black/15 bg-white shadow-2xl dark:border-white/15 dark:bg-neutral-950">
+            <div className="flex items-start justify-between gap-3 border-b border-black/10 px-4 py-3 dark:border-white/10">
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-text-primary">Claude Free Limit Resets</h3>
+                <p className="mt-0.5 truncate text-xs text-text-muted">{getConnectionLabel(claudeResetGrantsState.connection) || "Claude account"}</p>
+              </div>
+              <button type="button" onClick={() => setClaudeResetGrantsState(null)} aria-label="Close Claude reset grants" className="flex h-8 w-8 items-center justify-center rounded-lg text-text-muted hover:bg-black/5 dark:hover:bg-white/5">
+                <span className="material-symbols-outlined text-[18px]">close</span>
+              </button>
+            </div>
+            <div className="max-h-[70vh] space-y-3 overflow-auto p-4">
+              <div className="rounded-xl border border-black/10 bg-black/[0.02] px-3 py-2 text-xs text-text-muted dark:border-white/10 dark:bg-white/[0.03]">
+                {claudeResetGrantsState.resetData.availableCount} reset{claudeResetGrantsState.resetData.availableCount === 1 ? "" : "s"} available
+                {claudeResetGrantsState.resetData.cooldownUntil && <> · Cooldown until {formatCreditDate(claudeResetGrantsState.resetData.cooldownUntil)}</>}
+                {claudeResetGrantsState.resetData.weeklyResetsAt && <> · Weekly reset {formatCreditDate(claudeResetGrantsState.resetData.weeklyResetsAt)}</>}
+              </div>
+              {claudeResetGrantsState.grants.map((grant) => {
+                const canRedeem = claudeGrantStatus(grant) === "usable now";
+                return (
+                  <div key={grant.id} className="rounded-xl border border-black/10 p-3 dark:border-white/10">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium text-text-primary">{grant.label || "Claude reset grant"}</div>
+                        <div className="mt-1 text-xs text-text-muted">
+                          {grant.resetsLeft} of {grant.resetsTotal || grant.resetsLeft} resets remaining · Expires {formatCreditDate(grant.endsAt)}
+                        </div>
+                        {grant.clears?.length > 0 && <div className="mt-1 text-xs text-text-muted">Refills: {formatClaudeResetClears(grant.clears)}</div>}
+                        <div className="mt-1 text-xs text-text-muted">
+                          {grant.startsAt && <>Available from {formatCreditDate(grant.startsAt)} · </>}
+                          {formatTimeRemaining(grant.endsAt)} remaining
+                        </div>
+                        {!canRedeem && <div className="mt-1 text-xs text-text-muted">{claudeGrantStatus(grant)}</div>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setClaudeResetConfirmState({ connection: claudeResetGrantsState.connection, grant })}
+                        disabled={!canRedeem || Boolean(resettingLimitId)}
+                        className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Redeem
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {!claudeResetGrantsState.grants.length && <p className="py-8 text-center text-sm text-text-muted">No reset grants are available.</p>}
+            </div>
+          </div>
+        </div>
+      )}
       {resetCreditsState && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
           <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-black/15 bg-white shadow-2xl ring-1 ring-black/10 dark:border-white/15 dark:bg-neutral-950 dark:ring-white/10">

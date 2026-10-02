@@ -115,9 +115,9 @@ describe("decloakStreamChunk", () => {
     expect(decloakStreamChunk(delta, toolNameMap)).toBe(delta);
   });
 
-  it("tolerates null chunks and missing maps (stream flush path)", () => {
+  it("tolerates null chunks and restores names with missing or empty maps", () => {
     expect(decloakStreamChunk(null, toolNameMap)).toBeNull();
-    expect(decloakStreamChunk(toolUseStart("run_code" + CLAUDE_TOOL_SUFFIX), null).content_block.name).toBe("run_code" + CLAUDE_TOOL_SUFFIX);
-    expect(decloakStreamChunk(toolUseStart("run_code" + CLAUDE_TOOL_SUFFIX), new Map()).content_block.name).toBe("run_code" + CLAUDE_TOOL_SUFFIX);
+    expect(decloakStreamChunk(toolUseStart("run_code" + CLAUDE_TOOL_SUFFIX), null).content_block.name).toBe("run_code");
+    expect(decloakStreamChunk(toolUseStart("run_code" + CLAUDE_TOOL_SUFFIX), new Map()).content_block.name).toBe("run_code");
   });
 });

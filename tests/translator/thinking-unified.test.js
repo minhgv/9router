@@ -97,6 +97,11 @@ describe("applyThinking per provider format", () => {
     expect(out.output_config).toEqual({ effort: "high" });
     expect(out.thinking).toBeUndefined();
   });
+  it("preserves advertised xhigh effort for Sonnet 5", () => {
+    const out = apply("claude", "claude-sonnet-5-5", { reasoning_effort: "xhigh" }, "claude");
+    expect(out.output_config).toEqual({ effort: "xhigh" });
+  });
+
   it("claude haiku → enabled+budget", () => {
     const out = apply("claude", "claude-haiku-4.5", { reasoning_effort: "high" }, "claude");
     expect(out.thinking).toEqual({ type: "enabled", budget_tokens: 24576 });

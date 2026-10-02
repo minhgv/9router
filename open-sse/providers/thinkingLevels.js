@@ -1,5 +1,6 @@
 // Resolve valid thinking levels per model — drives UI level picker (suffix "model(level)").
 // Reuses capabilities.js (thinkingFormat/canDisable) so this file only maps format→levels (DRY).
+import { getProviderModels } from "../config/providerModels.js";
 import { getCapabilitiesForModel } from "./capabilities.js";
 import { matchPattern } from "./pricing.js";
 import { resolveKiroEffortPath } from "../config/kiroConstants.js";
@@ -36,7 +37,8 @@ const CODEX_GPT_5_6_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh
 
 // Model-name pattern overrides (glob, first match wins) — more precise than format default.
 const PATTERN_THINKING = [
-  { provider: "codex", pattern: "*gpt-6-sol*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
+  { pattern: "*claude-sonnet-5-5*", levels: ["none", "low", "medium", "high", "xhigh", "max"] },
+  { pattern: "*claude-sonnet-5*", levels: ["none", "low", "medium", "high", "xhigh", "max"] },
   { provider: "codex", pattern: "*gpt-6*", levels: CODEX_GPT_5_6_LEVELS },
   { provider: "codex", pattern: "*gpt-5.6-sol*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
   { provider: "codex", pattern: "*gpt-5.6-terra*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
@@ -99,12 +101,20 @@ const PATTERN_THINKING = [
 // Returns valid thinking levels for a model, or null when the model has no reasoning.
 export function getThinkingLevels(provider, model) {
   if (provider === "kiro" && resolveKiroEffortPath(model) === null) return null;
-  const caps = getCapabilitiesForModel(provider, model);
+  const isCodex = provider === "codex" || provider === "cx";
+  const resolvedProvider = isCodex ? "codex" : provider;
+  const caps = getCapabilitiesForModel(resolvedProvider, model);
   if (!caps.reasoning) return null;
-  const hit = PATTERN_THINKING.find((entry) =>
-    (!entry.provider || entry.provider === provider) && matchPattern(entry.pattern, model)
+  const baseId = isCodex
+    ? String(model || "").replace(/\[1m\]/ig, "").replace(/\([^()]+\)/g, "").replace(/-review$/i, "").trim()
+    : String(model || "").replace(/\([^()]+\)\s*$/, "");
+  const entry = isCodex
+    ? getProviderModels("cx").find((candidate) => candidate.id === baseId)
+    : null;
+  const hit = PATTERN_THINKING.find((item) =>
+    (!item.provider || item.provider === resolvedProvider) && matchPattern(item.pattern, model)
   );
-  let levels = hit?.levels || FORMAT_LEVELS[caps.thinkingFormat] || L.base;
-  if (caps.thinkingCanDisable === false) levels = levels.filter((l) => l !== "none");
+  let levels = entry?.thinkingLevels || hit?.levels || FORMAT_LEVELS[caps.thinkingFormat] || L.base;
+  if (caps.thinkingCanDisable === false) levels = levels.filter((level) => level !== "none");
   return levels;
 }

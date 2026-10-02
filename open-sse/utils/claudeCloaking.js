@@ -1,5 +1,11 @@
 import { CLAUDE_TOOL_SUFFIX } from "../config/appConstants.js";
 
+function stripCloakSuffix(name) {
+  if (typeof name !== "string" || !name.endsWith(CLAUDE_TOOL_SUFFIX)) return null;
+  const original = name.slice(0, -CLAUDE_TOOL_SUFFIX.length);
+  return original || null;
+}
+
 /**
  * Map client tool names with CLAUDE_TOOL_SUFFIX ("_ide") when forwarding to Claude OAuth:
  * - Rename client tools with CLAUDE_TOOL_SUFFIX in tools[] and messages[]
@@ -59,12 +65,12 @@ export function cloakClaudeTools(body) {
 
 // Decloak tool_use names in non-streaming Claude response body (INPUT side)
 export function decloakToolNames(body, toolNameMap) {
-  if (!toolNameMap?.size || !Array.isArray(body?.content)) return body;
+  if (!Array.isArray(body?.content)) return body;
   const content = body.content.map(block => {
-    if (block?.type === "tool_use" && toolNameMap.has(block.name)) {
-      return { ...block, name: toolNameMap.get(block.name) };
-    }
-    return block;
+    if (block?.type !== "tool_use") return block;
+    if (toolNameMap?.has(block.name)) return { ...block, name: toolNameMap.get(block.name) };
+    const fallback = stripCloakSuffix(block.name);
+    return fallback ? { ...block, name: fallback } : block;
   });
   return { ...body, content };
 }
@@ -86,11 +92,11 @@ export function decloakToolNames(body, toolNameMap) {
  * @returns {object|null} The chunk, with the tool_use name restored when cloaked
  */
 export function decloakStreamChunk(chunk, toolNameMap) {
-  if (!toolNameMap?.size || !chunk || typeof chunk !== "object") return chunk;
+  if (!chunk || typeof chunk !== "object") return chunk;
   if (chunk.type !== "content_block_start") return chunk;
   const block = chunk.content_block;
   if (block?.type !== "tool_use" || typeof block.name !== "string") return chunk;
-  const original = toolNameMap.get(block.name);
+  const original = toolNameMap?.get(block.name) || stripCloakSuffix(block.name);
   if (!original) return chunk;
   return { ...chunk, content_block: { ...block, name: original } };
 }

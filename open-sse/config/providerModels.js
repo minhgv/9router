@@ -27,8 +27,11 @@ const DOT_VERSION_PROVIDERS = new Set(["kr", "kiro"]);
 // ("claude-sonnet-4-5" ~= "claude-sonnet-4.5"). Other providers use exact match only.
 function findModel(models, modelId, aliasOrId) {
   if (!models) return undefined;
+  const isCodex = aliasOrId === "cx" || aliasOrId === "codex";
   const baseModelId = typeof modelId === "string"
-    ? modelId.replace(/\([^()]+\)\s*$/, "").trim()
+    ? (isCodex
+      ? modelId.replace(/\[1m\]/ig, "").replace(/\([^()]+\)/g, "").trim()
+      : modelId.replace(/\([^()]+\)\s*$/, "").replace(/\[1m\]/ig, "").trim())
     : modelId;
   const found = models.find(m => m.id === modelId || m.id === baseModelId);
   if (found) return found;
@@ -77,11 +80,12 @@ export function getModelType(aliasOrId, modelId) {
 }
 
 export function getModelUpstreamId(aliasOrId, modelId) {
-  // Split off thinking suffix "(level)" so lookup hits the base id; re-append it to
-  // the result so downstream applyThinking still sees the suffix (body.model is stripped separately).
-  const sufMatch = typeof modelId === "string" ? modelId.match(/\([^()]+\)\s*$/) : null;
+  // Context annotations are local metadata; effort annotations stay available to
+  // downstream thinking translation, while review variants resolve to their wire model.
+  const withoutContext = typeof modelId === "string" ? modelId.replace(/\[1m\]/ig, "").trim() : modelId;
+  const sufMatch = typeof withoutContext === "string" ? withoutContext.match(/\([^()]+\)/) : null;
   const suffix = sufMatch ? sufMatch[0] : "";
-  const baseId = suffix ? modelId.slice(0, sufMatch.index).trim() : modelId;
+  const baseId = suffix ? withoutContext.replace(suffix, "").trim() : withoutContext;
   const models = PROVIDER_MODELS[aliasOrId];
   const found = findModel(models, baseId, aliasOrId);
   const resolvedId = found?.upstreamModelId || found?.id;

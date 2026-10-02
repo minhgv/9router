@@ -33,7 +33,7 @@ function runStream(targetFormat, sourceFormat, events) {
 }
 
 describe("GOLDEN response stream: Claude → OpenAI", () => {
-  it("text + thinking + tool_use + usage + finish", () => {
+  it("preserves reasoning, text, tools, usage, and finish semantics", () => {
     const events = [
       { type: "message_start", message: { id: "msg_1", model: "claude-opus-4-6" } },
       { type: "content_block_start", index: 0, content_block: { type: "thinking" } },
@@ -48,7 +48,22 @@ describe("GOLDEN response stream: Claude → OpenAI", () => {
       { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 3 } },
       { type: "message_stop" },
     ];
-    expect(runStream(FORMATS.CLAUDE, FORMATS.OPENAI, events)).toMatchSnapshot();
+    const chunks = runStream(FORMATS.CLAUDE, FORMATS.OPENAI, events);
+    const deltas = chunks.flatMap((chunk) => chunk.choices?.map((choice) => choice.delta) || []);
+    expect(deltas.some((delta) => delta.reasoning_content === "let me think")).toBe(true);
+    expect(deltas.some((delta) => delta.content === "Hello")).toBe(true);
+    expect(deltas.some((delta) => delta.content?.includes("<think>") || delta.content?.includes("</think>"))).toBe(false);
+    const toolDeltas = deltas.flatMap((delta) => delta.tool_calls || []);
+    expect(toolDeltas.some((tool) => tool.id === "tu_1" && tool.function?.name === "get_weather")).toBe(true);
+    expect(toolDeltas.map((tool) => tool.function?.arguments || "").join("")).toBe('{"city":"NYC"}');
+    const terminal = chunks.find((chunk) => chunk.choices?.[0]?.finish_reason);
+    expect(terminal.choices[0].finish_reason).toBe("tool_calls");
+    expect(terminal.usage).toMatchObject({
+      prompt_tokens: 13,
+      completion_tokens: 5,
+      total_tokens: 18,
+      prompt_tokens_details: { cached_tokens: 3 },
+    });
   });
 });
 

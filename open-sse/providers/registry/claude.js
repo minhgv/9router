@@ -52,8 +52,10 @@ export default {
     },
     usage: {
       oauthUrl: "https://api.anthropic.com/api/oauth/usage",
-      orgUrl: "https://api.anthropic.com/v1/organizations/{org_id}/usage",
+      orgUrl: "https://api.anthropic.com/api/organizations/{org_id}/usage",
       settingsUrl: "https://api.anthropic.com/v1/settings",
+      profileUrl: "https://api.anthropic.com/api/oauth/profile",
+      resetUrl: "https://api.anthropic.com/api/organizations/{org_id}/reset_rate_limits",
     },
   },
   models: [
@@ -62,6 +64,7 @@ export default {
     { id: "claude-fable-5-1", name: "Claude Fable 5.1" },
     { id: "claude-fable-5", name: "Claude Fable 5" },
     { id: "claude-sonnet-5", name: "Claude Sonnet 5" },
+    { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
     { id: "claude-haiku-4-5-20251001", name: "Claude 4.5 Haiku" },
   ],
   oauth: {

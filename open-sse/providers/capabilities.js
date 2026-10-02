@@ -99,11 +99,11 @@ export const MODEL_CAPABILITIES = {
   "claude-opus-4-8-thinking": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
   "claude-sonnet-4.6": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
   "claude-sonnet-4-6": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
-  "claude-sonnet-5": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
+  "claude-sonnet-5": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", thinkingXhigh: true, forcedToolChoice: false, contextWindow: 1000000, maxOutput: 128000, thinkingOff: "between_tools" },
+  "claude-sonnet-5-5": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", thinkingXhigh: true, forcedToolChoice: false, contextWindow: 1000000, maxOutput: 128000, thinkingOff: "between_tools" },
   "claude-sonnet-5-thinking": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
   "claude-sonnet-5-agentic": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
   "claude-sonnet-5-thinking-agentic": { vision: true, reasoning: true, search: true, thinkingFormat: "claude-adaptive", contextWindow: 1000000, maxOutput: 128000 },
-
   // Gemini image-gen / OpenAI image / xai image variants
   "gpt-image-1":       { imageOutput: true, tools: false },
 
@@ -187,6 +187,7 @@ const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true,
 // (lower than OpenAI API's 1.05M). Sol differs from Terra/Luna. #2720
 const CODEX_GPT_56_SOL_CAPS  = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 372000, maxOutput: 128000 };
 const CODEX_GPT_56_DEFAULT_CAPS = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
+const CODEX_EXTENDED_CAPS = { ...CODEX_GPT_56_DEFAULT_CAPS, contextWindow: 872000 };
 
 /**
  * Provider-specific capability overrides. Keyed by provider alias/id.
@@ -255,12 +256,18 @@ export const PROVIDER_CAPABILITIES = {
   },
   "codex": {
     "gpt-6-astra":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
+    "gpt-6-sol":                 { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
+    "gpt-6-luna":                { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
+    "gpt-6-astra[1m]":           CODEX_EXTENDED_CAPS,
+    "gpt-6-sol[1m]":             CODEX_EXTENDED_CAPS,
+    "gpt-6-luna[1m]":            CODEX_EXTENDED_CAPS,
+    "gpt-6.1-sol":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
     "gpt-5.6-sol":               CODEX_GPT_56_SOL_CAPS,
-    "gpt-5.6-sol-review":        CODEX_GPT_56_SOL_CAPS,
+    "gpt-5.6-sol[1m]":           { ...CODEX_GPT_56_SOL_CAPS, contextWindow: 872000 },
     "gpt-5.6-terra":             CODEX_GPT_56_DEFAULT_CAPS,
-    "gpt-5.6-terra-review":      CODEX_GPT_56_DEFAULT_CAPS,
+    "gpt-5.6-terra[1m]":         { ...CODEX_GPT_56_DEFAULT_CAPS, contextWindow: 872000 },
     "gpt-5.6-luna":              CODEX_GPT_56_DEFAULT_CAPS,
-    "gpt-5.6-luna-review":       CODEX_GPT_56_DEFAULT_CAPS,
+    "gpt-5.6-luna[1m]":          { ...CODEX_GPT_56_DEFAULT_CAPS, contextWindow: 872000 },
   },
   "kiro": {
     "gpt-5.6-sol": KIRO_GPT_5_6_CAPABILITIES,
@@ -640,6 +647,7 @@ function isCommandCodeTextOnly(model) {
   return false;
 }
 export function getCapabilitiesForModel(provider, model) {
+  if (provider === "cx") provider = "codex";
   if (!model) return { ...DEFAULT_CAPABILITIES };
 
   // Canonical exact lookup strips vendor prefix: "anthropic/claude-opus-4.7" -> "claude-opus-4.7".
@@ -665,6 +673,14 @@ export function getCapabilitiesForModel(provider, model) {
   // 1. Provider-specific override
   if (provider) {
     const providerCaps = PROVIDER_CAPABILITIES[provider];
+    const codexProvider = provider === "codex" || provider === "cx";
+    if (codexProvider) {
+      const contextMarker = /\[1m\]/i.test(model) ? "[1m]" : "";
+      const normalizedCodexModel = model.replace(/\[1m\]/ig, "").replace(/\([^()]+\)/g, "").trim();
+      const codexModel = normalizedCodexModel.replace(/-review$/i, "") + contextMarker;
+      if (providerCaps?.[codexModel]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[codexModel] };
+      if (providerCaps?.[normalizedCodexModel]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[normalizedCodexModel] };
+    }
     if (providerCaps?.[model]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[model] };
     if (providerCaps?.[baseModel]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[baseModel] };
   }

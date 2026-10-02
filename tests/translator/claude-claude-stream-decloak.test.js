@@ -36,10 +36,10 @@ describe("Claude → Claude streaming passthrough (OAuth tool cloak)", () => {
     expect(outText).toBe(textChunk);
   });
 
-  it("is a no-op when no cloak map is present", () => {
+  it("restores a cloaked tool name from its suffix when the request map is absent", () => {
     const chunk = toolUseStart(CLOAKED);
     const [out] = translateResponse(FORMATS.CLAUDE, FORMATS.CLAUDE, chunk, {});
-    expect(out).toBe(chunk);
+    expect(out.content_block.name).toBe("run_code");
   });
 
   it("tolerates the null flush chunk", () => {

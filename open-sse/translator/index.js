@@ -1,6 +1,6 @@
 import { FORMATS } from "./formats.js";
 import { ensureToolCallIds, fixMissingToolResponses } from "./concerns/toolCall.js";
-import { prepareClaudeRequest } from "./formats/claude.js";
+import { prepareClaudeRequest, ensureTrailingUserTurn } from "./formats/claude.js";
 import { cloakClaudeTools, decloakStreamChunk } from "../utils/claudeCloaking.js";
 import { restoreToolNames } from "../utils/opencodeFingerprint.js";
 import { filterToOpenAIFormat } from "./formats/openai.js";
@@ -9,6 +9,7 @@ import { applyThinking, captureThinking } from "./concerns/thinkingUnified.js";
 import { captureSessionId } from "../utils/sessionManager.js";
 import { AntigravityExecutor } from "../executors/antigravity.js";
 import { PROVIDERS } from "../providers/index.js";
+import { ROLE, GEMINI_ROLE } from "./schema/roles.js";
 
 // Registry for translators. Lazy-init guards against circular-import order:
 // translator modules call register() (side-effect) before this module's body runs.
@@ -48,10 +49,20 @@ function stripContentTypes(body, stripList = []) {
     if (msg.content.length === 0) msg.content = "";
   }
 }
+function detectClientLastRole(sourceFormat, body) {
+  if (Array.isArray(body?.messages)) return body.messages[body.messages.length - 1]?.role;
+  const items = sourceFormat === FORMATS.GEMINI || sourceFormat === FORMATS.ANTIGRAVITY ||
+    sourceFormat === FORMATS.GEMINI_CLI ? body?.contents : body?.input;
+  if (!Array.isArray(items)) return undefined;
+  const role = items[items.length - 1]?.role;
+  return role === ROLE.ASSISTANT || role === GEMINI_ROLE.MODEL ? ROLE.ASSISTANT : undefined;
+}
+
 
 // Translate request: source -> openai -> target
 export function translateRequest(sourceFormat, targetFormat, model, body, stream = true, credentials = null, provider = null, reqLogger = null, stripList = [], connectionId = null, clientTool = null) {
   ensureInitialized();
+  const originalLastRole = detectClientLastRole(sourceFormat, body);
   let result = body;
 
   // Strip explicit content types (opt-in via strip[] in PROVIDER_MODELS entry)
@@ -132,6 +143,9 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
   if (targetFormat === FORMATS.CLAUDE) {
     const apiKey = credentials?.accessToken || credentials?.apiKey || null;
     result = prepareClaudeRequest(result, provider, apiKey, connectionId, credentials?.rawHeaders, clientSessionId);
+    if (Array.isArray(result?.messages)) {
+      result.messages = ensureTrailingUserTurn(result.messages, originalLastRole);
+    }
   }
 
   // Claude tool mapping: map client tools with CLAUDE_TOOL_SUFFIX
@@ -269,6 +283,8 @@ export function initState(sourceFormat) {
       funcArgsDone: {},
       funcItemDone: {},
       customToolNames: new Set(),
+      responsesUsage: null,
+      completionPending: false,
       completedSent: false
     };
   }

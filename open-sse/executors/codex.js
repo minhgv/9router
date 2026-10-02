@@ -7,7 +7,7 @@ import {
 } from "../services/oauthCredentialManager.js";
 import { normalizeResponsesInput } from "../translator/formats/responsesApi.js";
 import { fetchImageAsBase64 } from "../translator/concerns/image.js";
-import { getModelUpstreamId } from "../config/providerModels.js";
+import { getModelUpstreamId, getProviderModels } from "../config/providerModels.js";
 import { getThinkingLevels } from "../providers/thinkingLevels.js";
 import { DEFAULT_RETRY_CONFIG, HTTP_STATUS, resolveRetryEntry } from "../config/runtimeConfig.js";
 import { dbg } from "../utils/debugLog.js";
@@ -24,6 +24,15 @@ const CODEX_SSE_USER_OUTPUT_PATTERNS = [
   '"type":"response.function_call_arguments.delta"',
 ];
 const CODEX_SSE_PEEK_BYTES = 256 * 1024;
+function isCodexResponsesLiteModel(model) {
+  let id = String(model || "").trim();
+  let previous;
+  do {
+    previous = id;
+    id = id.replace(/\([^()]+\)\s*$/, "").replace(/\[1m\]\s*$/i, "").replace(/-review$/i, "").trim();
+  } while (id !== previous);
+  return getProviderModels("cx").some((entry) => entry.id === id && entry.responsesLite === true);
+}
 const CODEX_MODEL_CAPACITY_MESSAGE = "Selected model is at capacity. Please try a different model.";
 
 // Server-generated item id prefixes that Codex /responses cannot resolve when store=false
@@ -43,7 +52,7 @@ const CODEX_PASSTHROUGH_TOOL_TYPES = new Set(["custom"]);
 const RESPONSES_API_ALLOWLIST = new Set([
   "model", "input", "instructions", "tools", "tool_choice", "stream", "store",
   "reasoning", "service_tier", "include", "prompt_cache_key", "client_metadata",
-  "text"
+  "text", "parallel_tool_calls"
 ]);
 
 // Convert role=system → role=developer in body.input (keeps content in cacheable prefix)
@@ -115,11 +124,20 @@ function normalizeCodexTools(body) {
   if (patternStats.removed > 0) {
     dbg("CODEX", `stripped ${patternStats.removed} unsupported tool schema pattern(s)`);
   }
-  // Drop tool_choice if it references an unknown function name
+  // Drop or normalize tool_choice if it references an unknown function name.
   if (body.tool_choice && typeof body.tool_choice === "object" && !Array.isArray(body.tool_choice)) {
-    if (body.tool_choice.type === "function") {
-      const n = typeof body.tool_choice.name === "string" ? body.tool_choice.name.trim() : "";
+    const choice = body.tool_choice;
+    if (choice.type === "function" && choice.function && typeof choice.function.name === "string") {
+      choice.name = choice.function.name;
+      delete choice.function;
+    }
+    if (choice.type === "function") {
+      const n = typeof choice.name === "string" ? choice.name.trim() : "";
       if (!n || !validNames.has(n)) delete body.tool_choice;
+    } else if (choice.type === "required") {
+      choice.type = "any";
+    } else if (!["auto", "none", "any"].includes(choice.type)) {
+      delete body.tool_choice;
     }
   }
 }
@@ -138,6 +156,7 @@ function resolveCacheSessionId(body, credentials) {
 function normalizeReasoningEffort(model, value) {
   const supportedLevels = getThinkingLevels("codex", model);
   if (supportedLevels?.includes(value)) return value;
+  if (isCodexResponsesLiteModel(model) && (value === "none" || value === "minimal")) return "low";
   if (value === "ultra" && supportedLevels?.includes("max")) return "max";
   if (value === "max" || value === "ultra") return "xhigh";
   return value;
@@ -209,8 +228,12 @@ export class CodexExecutor extends BaseExecutor {
    * Override headers to add codex-specific identity headers.
    * transformRequest runs BEFORE buildHeaders, sets this._currentSessionId.
    */
-  buildHeaders(credentials, stream = true) {
+  buildHeaders(credentials, stream = true, _url = null, model = null, body = null) {
     const headers = super.buildHeaders(credentials, stream);
+    const hasHostedSearch = body?.tools?.some?.((tool) => tool && ["web_search", "web_search_preview"].includes(tool.type));
+    if (isCodexResponsesLiteModel(model && getModelUpstreamId("cx", model)) && !hasHostedSearch) {
+      headers["x-openai-internal-codex-responses-lite"] = "true";
+    }
     headers["session_id"] = this._currentSessionId || credentials?.connectionId || "default";
     // Identify client type to Codex backend (matches official codex CLI)
     if (!headers["originator"]) headers["originator"] = "codex_cli_rs";
@@ -238,7 +261,6 @@ export class CodexExecutor extends BaseExecutor {
     if (!credentials?.refreshToken) return null;
     return refreshProviderCredentials("codex", credentials, log, proxyOptions);
   }
-
   needsRefresh(credentials) {
     return shouldRefreshCredentials("codex", credentials);
   }
@@ -413,7 +435,61 @@ export class CodexExecutor extends BaseExecutor {
     // Convert string input to array format (Codex API requires input as array)
     const normalized = normalizeResponsesInput(body.input);
     if (normalized) body.input = normalized;
+    const upstreamModel = getModelUpstreamId("cx", body.model || model);
+    const responsesLiteModel = isCodexResponsesLiteModel(upstreamModel);
+    const searchTool = (tool) => tool && ["web_search", "web_search_preview"].includes(tool.type);
+    const hasPrefixedSearch = () => Array.isArray(body.input) && body.input.some((item) =>
+      item?.type === "additional_tools" && item.tools?.some?.(searchTool));
+    let convertedLitePrefix = false;
+    if (responsesLiteModel && Array.isArray(body.input)
+      && (body.tools?.some?.(searchTool) || hasPrefixedSearch())) {
+      const tools = Array.isArray(body.tools) ? [...body.tools] : [];
+      const seen = new Set(tools.map((tool) => `${tool?.type}:${tool?.name || tool?.function?.name || ""}`));
+      for (const item of body.input) {
+        if (item?.type !== "additional_tools" || !Array.isArray(item.tools)) continue;
+        for (const tool of item.tools) {
+          const key = `${tool?.type}:${tool?.name || tool?.function?.name || ""}`;
+          if (!seen.has(key)) { tools.push(tool); seen.add(key); }
+        }
+      }
+      body.tools = tools;
+      convertedLitePrefix = body.input.some((item) => item?.type === "additional_tools");
+      body.input = body.input.filter((item) => item?.type !== "additional_tools");
+    }
+    if (responsesLiteModel) normalizeCodexTools(body);
+    const hasHostedSearch = body.tools?.some?.(searchTool);
+    const responsesLite = responsesLiteModel && !hasHostedSearch;
 
+    if (responsesLite && (!Array.isArray(body.input) || body.input.length === 0)) {
+      body.input = [{ type: "message", role: "user", content: [{ type: "input_text", text: "..." }] }];
+    }
+    if (responsesLite && Array.isArray(body.input)) {
+      const input = body.input;
+      const existingToolsPrefix = input.find((item) => item?.type === "additional_tools");
+      const tools = Array.isArray(body.tools) ? body.tools : [];
+      if (existingToolsPrefix) {
+        const existing = Array.isArray(existingToolsPrefix.tools) ? existingToolsPrefix.tools : [];
+        const names = new Set(existing.map((tool) => tool?.name).filter(Boolean));
+        existingToolsPrefix.tools = [...existing, ...tools.filter((tool) => !tool?.name || !names.has(tool.name))];
+      } else {
+        input.unshift({ type: "additional_tools", role: "developer", tools });
+      }
+      const hasInstructionsPrefix = input.some((item) => item?.type === "message" && item.role === "developer"
+        && item.content?.some?.((part) => part?.type === "input_text" && typeof part.text === "string"));
+      if (!hasInstructionsPrefix) {
+        const instructions = typeof body.instructions === "string" && body.instructions.trim()
+          ? body.instructions : CODEX_DEFAULT_INSTRUCTIONS;
+        if (instructions) {
+          const toolsPrefixIndex = input.findIndex((item) => item?.type === "additional_tools");
+          input.splice(toolsPrefixIndex + 1, 0, { type: "message", role: "developer", content: [{ type: "input_text", text: instructions }] });
+        }
+      }
+      body.instructions = "";
+      body.tools = null;
+      body.tool_choice ||= "auto";
+      body.parallel_tool_calls = false;
+      body.reasoning = { ...(body.reasoning || {}), context: "all_turns" };
+    }
     // Ensure input is present and non-empty (Codex API rejects empty input)
     if (!body.input || (Array.isArray(body.input) && body.input.length === 0)) {
       body.input = [{ type: "message", role: "user", content: [{ type: "input_text", text: "..." }] }];
@@ -430,9 +506,10 @@ export class CodexExecutor extends BaseExecutor {
     body.stream = true;
 
     // If no instructions provided, inject default Codex instructions
-    if (!body.instructions || body.instructions.trim() === "") {
+    if (!responsesLite && !convertedLitePrefix && (!body.instructions || body.instructions.trim() === "")) {
       body.instructions = CODEX_DEFAULT_INSTRUCTIONS;
     }
+    if (convertedLitePrefix && !body.instructions) body.instructions = "";
 
     // Ensure store is false (Codex requirement)
     body.store = false;
@@ -443,29 +520,31 @@ export class CodexExecutor extends BaseExecutor {
     }
 
     // Map virtual Codex review models to the upstream Codex model before suffix parsing.
-    body.model = getModelUpstreamId("cx", body.model || model);
+    body.model = upstreamModel;
 
     // Extract thinking level from model name suffix
     // e.g., gpt-5.3-codex-high → high, gpt-5.3-codex → medium (default)
-    const effortLevels = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+    const effortLevels = ["none", "minimal", "low", "medium", "high", "xhigh"];
     let modelEffort = null;
+    const parenthesizedEffort = body.model.match(/\(([^()]+)\)\s*$/);
+    if (parenthesizedEffort && effortLevels.includes(parenthesizedEffort[1])) {
+      modelEffort = parenthesizedEffort[1];
+      body.model = body.model.slice(0, parenthesizedEffort.index).trim();
+    }
     for (const level of effortLevels) {
       if (body.model.endsWith(`-${level}`)) {
-        modelEffort = level;
-        // Strip suffix from model name for actual API call
-        body.model = body.model.replace(`-${level}`, '');
+        modelEffort ||= level;
+        body.model = body.model.slice(0, -(level.length + 1));
         break;
       }
     }
 
-    // Priority: explicit reasoning.effort > reasoning_effort param > model suffix > default (medium)
-    if (!body.reasoning) {
-      const effort = normalizeReasoningEffort(body.model, body.reasoning_effort || modelEffort || 'low');
-      body.reasoning = { effort, summary: "auto" };
-    } else {
-      body.reasoning.effort = normalizeReasoningEffort(body.model, body.reasoning.effort);
-      if (!body.reasoning.summary) body.reasoning.summary = "auto";
-    }
+    // Explicit reasoning takes precedence over request parameter, then model suffix.
+    const defaultEffort = responsesLite ? "medium" : "low";
+    const effort = body.reasoning?.effort || body.reasoning_effort || modelEffort || defaultEffort;
+    body.reasoning = { ...(body.reasoning || {}), effort: normalizeReasoningEffort(body.model, effort) };
+    if (!responsesLite && !body.reasoning.summary) body.reasoning.summary = "auto";
+    if (responsesLite) body.reasoning.context = "all_turns";
     delete body.reasoning_effort;
 
     // Include reasoning encrypted content (required by Codex backend for reasoning models)

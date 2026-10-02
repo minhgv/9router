@@ -1,18 +1,21 @@
 /**
  * Claude usage handler
  */
+import { randomUUID } from "node:crypto";
 
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
-import { ANTHROPIC_API_VERSION } from "../../providers/shared.js";
+import { ANTHROPIC_API_VERSION, CLAUDE_CLI_VERSION } from "../../providers/shared.js";
 import { U, parseResetTime } from "./shared.js";
 import { parseRetryAfter } from "../accountFallback.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "../../config/errorConfig.js";
-// Claude API config (urls from registry, apiVersion is header logic kept here)
 const CLAUDE_CONFIG = {
   oauthUsageUrl: U("claude").oauthUrl,
   usageUrl: U("claude").orgUrl,
   settingsUrl: U("claude").settingsUrl,
+  profileUrl: U("claude").profileUrl,
+  resetUrl: U("claude").resetUrl,
   apiVersion: ANTHROPIC_API_VERSION,
+  userAgent: `claude-cli/${CLAUDE_CLI_VERSION} (external, cli)`,
 };
 
 // OAuth usage endpoint rate-limits (429); cool down per-token to stop hammering it.
@@ -64,13 +67,14 @@ async function fetchClaudeUsageRaw(accessToken, proxyOptions = null) {
       return await getClaudeUsageLegacy(accessToken, proxyOptions);
     }
 
-    // Primary: OAuth usage endpoint (Claude Code consumer OAuth tokens)
-    const oauthResponse = await proxyAwareFetch(CLAUDE_CONFIG.oauthUsageUrl, {
+    // cedar_ember=1 adds the free "limit reset" grants visible in Claude Code.
+    const oauthResponse = await proxyAwareFetch(`${CLAUDE_CONFIG.oauthUsageUrl}?cedar_ember=1`, {
       method: "GET",
       headers: {
         "Authorization": `Bearer ${accessToken}`,
         "anthropic-beta": "oauth-2025-04-20",
         "anthropic-version": CLAUDE_CONFIG.apiVersion,
+        "User-Agent": CLAUDE_CONFIG.userAgent,
       },
     }, proxyOptions);
 
@@ -130,6 +134,7 @@ async function fetchClaudeUsageRaw(accessToken, proxyOptions = null) {
       return {
         plan: "Claude Code",
         extraUsage: data.extra_usage ?? null,
+        resetCredits: parseClaudeResetGrants(data.cedar_ember),
         quotas,
       };
     }
@@ -149,6 +154,69 @@ async function fetchClaudeUsageRaw(accessToken, proxyOptions = null) {
   } catch (error) {
     return { message: `Claude connected. Unable to fetch usage: ${error.message}` };
   }
+}
+
+export function parseClaudeResetGrants(block) {
+  if (!block?.eligible || !Array.isArray(block.grants)) return null;
+  const grants = block.grants.filter((grant) =>
+    typeof grant?.id === "string" && grant.id && !grant.paused &&
+    Number.isFinite(Number(grant.resets_left)) && Number(grant.resets_left) > 0);
+  const next = grants.find((grant) => grant.id === block.next_grant_id) || grants[0] || null;
+  return {
+    availableCount: grants.reduce((sum, grant) => sum + Number(grant.resets_left), 0),
+    nextGrantId: next?.id || null,
+    expiresAt: next?.ends_at || null,
+    clears: Array.isArray(next?.clears) ? next.clears.filter((item) => typeof item === "string") : [],
+    cooldownUntil: typeof block.cooldown_until === "string" ? block.cooldown_until : null,
+    weeklyResetsAt: typeof block.weekly_resets_at === "string" ? block.weekly_resets_at : null,
+    grants: block.grants.filter((grant) => typeof grant?.id === "string" && grant.id).map((grant) => ({
+      id: grant.id,
+      label: typeof grant.label === "string" ? grant.label : "",
+      resetsLeft: Number.isFinite(Number(grant.resets_left)) ? Number(grant.resets_left) : 0,
+      resetsTotal: Number.isFinite(Number(grant.resets_total)) ? Number(grant.resets_total) : 0,
+      startsAt: typeof grant.starts_at === "string" ? grant.starts_at : null,
+      endsAt: typeof grant.ends_at === "string" ? grant.ends_at : null,
+      clears: Array.isArray(grant.clears) ? grant.clears.filter((item) => typeof item === "string") : [],
+      paused: grant.paused === true,
+      usableNow: grant.usable_now === true,
+      useRequiresLimit: grant.use_requires_limit !== false,
+    })),
+  };
+}
+
+export async function consumeClaudeResetGrant(accessToken, grantId, proxyOptions = null) {
+  if (!accessToken) throw new Error("No Claude access token available.");
+  if (typeof grantId !== "string" || !/^[a-z0-9_-]{1,40}$/.test(grantId)) throw new Error("Invalid reset grant id.");
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "anthropic-beta": "oauth-2025-04-20",
+    "anthropic-version": CLAUDE_CONFIG.apiVersion,
+    "User-Agent": CLAUDE_CONFIG.userAgent,
+    "Content-Type": "application/json",
+  };
+  const profileResponse = await proxyAwareFetch(CLAUDE_CONFIG.profileUrl, { method: "GET", headers }, proxyOptions);
+  const profile = await profileResponse.json().catch(() => null);
+  const organizationId = profile?.organization?.uuid;
+  if (!profileResponse.ok || typeof organizationId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(organizationId)) {
+    throw new Error("Cannot resolve Claude organization.");
+  }
+  const url = CLAUDE_CONFIG.resetUrl.replace("{org_id}", encodeURIComponent(organizationId));
+  const response = await proxyAwareFetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ program: "cedar_ember", grant_id: grantId, request_id: randomUUID() }),
+  }, proxyOptions);
+  const data = await response.json().catch(() => null);
+  usageCache.delete(accessToken);
+  return {
+    ok: response.ok && data?.result === "reset",
+    status: response.status,
+    result: data?.result || null,
+    reason: data?.reason || null,
+    resetsLeft: data?.resets_left ?? null,
+    message: data?.error?.message || null,
+  };
 }
 
 /**

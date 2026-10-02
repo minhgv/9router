@@ -1,6 +1,9 @@
 # Unreleased
 
 ## Features
+- **Codex**: sync the selected upstream catalog and CLI identity (`0.159.0`), add GPT-6.1 Sol and extended-context variants, preserve review/effort/context annotations during model resolution, and support GPT-6 Responses Lite with hosted-search fallback to standard Responses.
+- **Claude**: add Sonnet 5.5/adaptive thinking, preserve intentional prefill and upload-only user turns, cache final tool results within the four-marker budget, and restore tool names when a response loses its mapping.
+- **Claude quota**: display available free-limit reset grants in Quota Tracker and redeem them through an authenticated, same-origin management endpoint with fixed upstream URLs and connection-scoped proxy policy.
 - **Devin**: collapse effort-tier siblings into logical variant models (`swe-2`, `claude-opus-5`, `gpt-5-6-terra`, … — 40 families ported from oh-my-pi's taxonomy) — `reasoning_effort` (`reasoning.effort` / `output_config.effort`), the `model(level)` suffix and short/dotted provider aliases (`dv/swe`, `swe-1.7`, `opus`) route to the sibling wire uid at request time with nearest-tier clamping; `requiresEffort` families land on the recommended default member instead of a nonexistent `-none` uid; raw sibling ids stay valid; per-family capabilities, pricing rows and thinking-level ladders added (`thinkingCanDisable:false` only where no off route exists)
 - **Usage**: add Cache Ratio column to the usage table (tokens view) — shows `cachedTokens / promptTokens` as a percentage per model/account/API key/endpoint, sortable via the column header
 
@@ -27,6 +30,8 @@
 - **Devin**: drop the legacy `devin-cli` subprocess provider and its connection type (superseded by the native executor above)
 
 ## Fixes
+- **Responses**: include completed output items and real usage in terminal events, handle direct/pivot usage trailers, and bound deferred completion with a three-second watchdog while preserving cancellation/error semantics.
+- **Provider compatibility**: merge client Claude beta/session headers under the existing OAuth capability policy and return allowlisted upstream rate-limit hints; retain native refresh fencing, proxy-aware Codex refresh, inline-only image handling, and the existing Antigravity/Devin integrations.
 - **Devin**: upstream errors that arrive mid-stream (including Connect trailer errors such as `unavailable`) are surfaced to the client as a well-formed SSE `error` event + `[DONE]` instead of erroring the response stream — the old path made Next.js abort with "failed to pipe response"; non-stream requests map the SSE error event to a `502` JSON error and re-enable account fallback
 - **Devin**: protobuf `int32` fields now decode through the 64-bit varint path — proto3 sign-extends negative values to 10-byte varints (e.g. `monthlyPromptCredits: -1`), which previously crashed GetUserStatus decoding with "Varint exceeds 32 bits"
 - **Devin**: resolve `adaptive` through `AssignModel` before chat, forwarding the current user/developer prompt and binding the assigned concrete model UID plus assignment JWT to the same Cascade ID; invalid assignments fail before chat, while direct models bypass assignment. Preserve router metadata in discovery and use the working local oh-my-pi request profile, including model-aware token/tool settings and CLI metadata. Correct the protobuf enum: `CASCADE` is wire value `5`, not `3` (`PLAN`); remove the misleading `CHAT` alias.

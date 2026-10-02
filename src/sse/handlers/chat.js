@@ -274,6 +274,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       }
     }
 
+    if (provider === "codex" && contextMarker) refreshedCredentials.contextMarker = contextMarker;
+
     // Use shared chatCore
     const chatSettings = await getSettings();
     const providerThinking = (chatSettings.providerThinking || {})[provider] || null;

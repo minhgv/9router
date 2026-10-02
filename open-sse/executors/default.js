@@ -1,6 +1,6 @@
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS, PROVIDER_OAUTH } from "../config/providers.js";
-import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE, selectAnthropicBeta, ANTHROPIC_1M_BETA } from "../providers/shared.js";
+import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE, selectAnthropicBeta, mergeAnthropicBeta, ANTHROPIC_1M_BETA } from "../providers/shared.js";
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
 import { OAUTH_ENDPOINTS, buildKimiHeaders } from "../config/appConstants.js";
 import { buildClineHeaders } from "../shared/clineAuth.js";
@@ -205,7 +205,15 @@ export class DefaultExecutor extends BaseExecutor {
     const isOAuth = credentials?.authType === "oauth" || (!credentials?.authType && !credentials?.apiKey && Boolean(credentials?.accessToken));
 
     if (model && (isOfficialClaude || isClaudeCompatible)) {
-      headers["Anthropic-Beta"] = selectAnthropicBeta(model, body);
+      const clientBeta = credentials?.rawHeaders?.["anthropic-beta"] || credentials?.rawHeaders?.["Anthropic-Beta"];
+      headers["Anthropic-Beta"] = mergeAnthropicBeta(selectAnthropicBeta(model, body), clientBeta);
+    }
+
+    // Forward only an explicit, bounded client session identifier on Claude OAuth.
+    const clientSessionId = credentials?.rawHeaders?.["x-claude-code-session-id"] || credentials?.rawHeaders?.["X-Claude-Code-Session-Id"];
+    if (isOfficialClaude && isOAuth && typeof clientSessionId === "string" &&
+      clientSessionId.length <= 128 && /^[A-Za-z0-9._:-]+$/.test(clientSessionId)) {
+      headers["x-claude-code-session-id"] = clientSessionId;
     }
 
     // Strip 1M-context beta for official Claude OAuth requests (including any caller overrides)

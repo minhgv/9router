@@ -20,6 +20,7 @@ import {
 } from "../formats/gemini.js";
 import { deriveSessionId, toNumericSessionId } from "../../utils/sessionManager.js";
 import { ROLE, GEMINI_ROLE, OPENAI_BLOCK, CLAUDE_BLOCK } from "../schema/index.js";
+import { attachReasonPlaceholderMap, registerReasonPlaceholders, recordPlaceholderPaths, takeReasonPlaceholderMap } from "../../utils/reasonPlaceholder.js";
 
 // Sanitize function names for Gemini API.
 // Gemini requires: starts with [a-zA-Z_], followed by [a-zA-Z0-9_.:\-], max 64 chars.
@@ -201,12 +202,14 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
   // Convert tools
   if (body.tools && Array.isArray(body.tools) && body.tools.length > 0) {
     const functionDeclarations = [];
+    const reasonPlaceholderMap = new Map();
     for (const t of body.tools) {
       // Check if already in Anthropic/Claude format (no type field, direct name/description/input_schema)
       if (t.name && t.input_schema) {
-        const cleanedSchema = cleanJSONSchemaForAntigravity(structuredClone(t.input_schema || { type: "object", properties: {} }));
+        const name = sanitizeGeminiFunctionName(t.name);
+        const cleanedSchema = cleanJSONSchemaForAntigravity(structuredClone(t.input_schema || { type: "object", properties: {} }), p => recordPlaceholderPaths(reasonPlaceholderMap, name, [p]));
         functionDeclarations.push({
-          name: sanitizeGeminiFunctionName(t.name),
+          name,
           description: t.description || "",
           parameters: cleanedSchema
         });
@@ -214,9 +217,10 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
       // OpenAI format
       else if (t.type === OPENAI_BLOCK.FUNCTION && t.function) {
         const fn = t.function;
-        const cleanedSchema = cleanJSONSchemaForAntigravity(structuredClone(fn.parameters || { type: "object", properties: {} }));
+        const name = sanitizeGeminiFunctionName(fn.name);
+        const cleanedSchema = cleanJSONSchemaForAntigravity(structuredClone(fn.parameters || { type: "object", properties: {} }), p => recordPlaceholderPaths(reasonPlaceholderMap, name, [p]));
         functionDeclarations.push({
-          name: sanitizeGeminiFunctionName(fn.name),
+          name,
           description: fn.description || "",
           parameters: cleanedSchema
         });
@@ -226,6 +230,7 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
     if (functionDeclarations.length > 0) {
       result.tools = [{ functionDeclarations }];
     }
+    attachReasonPlaceholderMap(result, reasonPlaceholderMap);
   }
 
   result.contents = normalizeGeminiContents(result.contents);
@@ -244,9 +249,10 @@ export function openaiToGeminiCLIRequest(model, body, stream, credentials = null
 
   // Clean schema for tools
   if (gemini.tools?.[0]?.functionDeclarations) {
+    const map = takeReasonPlaceholderMap(gemini) || new Map();
     for (const fn of gemini.tools[0].functionDeclarations) {
       if (fn.parameters) {
-        const cleanedSchema = cleanJSONSchemaForAntigravity(fn.parameters);
+        const cleanedSchema = cleanJSONSchemaForAntigravity(fn.parameters, p => recordPlaceholderPaths(map, fn.name, [p]));
         fn.parameters = cleanedSchema;
         // if (isClaude) {
         //   fn.parameters = cleanedSchema;
@@ -256,6 +262,7 @@ export function openaiToGeminiCLIRequest(model, body, stream, credentials = null
         // }
       }
     }
+    attachReasonPlaceholderMap(gemini, map);
   }
 
   return gemini;
@@ -293,6 +300,8 @@ function wrapInCloudCodeEnvelope(model, geminiCLI, credentials = null, isAntigra
       functionCallingConfig: { mode: "VALIDATED" }
     };
   }
+
+  registerReasonPlaceholders(envelope, takeReasonPlaceholderMap(geminiCLI));
 
   return envelope;
 }
@@ -392,11 +401,13 @@ function wrapInCloudCodeEnvelopeForClaude(model, claudeRequest, credentials = nu
   // Convert Claude tools to Gemini functionDeclarations
   if (claudeRequest.tools && Array.isArray(claudeRequest.tools)) {
     const functionDeclarations = [];
+    const reasonPlaceholderMap = new Map();
     for (const tool of claudeRequest.tools) {
       if (tool.name && tool.input_schema) {
-        const cleanedSchema = cleanJSONSchemaForAntigravity(tool.input_schema);
+        const name = sanitizeGeminiFunctionName(tool.name);
+        const cleanedSchema = cleanJSONSchemaForAntigravity(tool.input_schema, p => recordPlaceholderPaths(reasonPlaceholderMap, name, [p]));
         functionDeclarations.push({
-          name: sanitizeGeminiFunctionName(tool.name),
+          name,
           description: tool.description || "",
           parameters: cleanedSchema
         });
@@ -408,6 +419,7 @@ function wrapInCloudCodeEnvelopeForClaude(model, claudeRequest, credentials = nu
         functionCallingConfig: { mode: "VALIDATED" }
       };
     }
+    registerReasonPlaceholders(envelope, reasonPlaceholderMap);
   }
 
   const systemParts = [];

@@ -6,6 +6,7 @@ import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { resolveSessionId, toNumericSessionId } from "../utils/sessionManager.js";
 import { proxyAwareFetch, deriveConnectionProxyOptions } from "../utils/proxyFetch.js";
 import { cleanJSONSchemaForAntigravity, normalizeGeminiContents } from "../translator/formats/gemini.js";
+import { REASON_PLACEHOLDER_PROP, recordPlaceholderPaths, registerReasonPlaceholders } from "../utils/reasonPlaceholder.js";
 import { DEFAULT_THINKING_AG_SIGNATURE } from "../config/defaultThinkingSignature.js";
 import { getGeminiThoughtSignatureSync } from "../services/thoughtSignatureStore.js";
 import { ensureAntigravityVersion, getAntigravityIdeUserAgent } from "../utils/antigravityVersion.js";
@@ -321,6 +322,7 @@ export class AntigravityExecutor extends BaseExecutor {
       // Merge all groups into a single functionDeclarations group (Gemini expects 1 group)
       const seenToolNames = new Set();
       const allDeclarations = [];
+      const reasonPlaceholderMap = new Map();
       for (const group of tools) {
         for (const fn of group.functionDeclarations || []) {
           const name = sanitizeFunctionName(fn.name);
@@ -330,11 +332,13 @@ export class AntigravityExecutor extends BaseExecutor {
             ...fn,
             name,
             parameters: fn.parameters
-              ? cleanJSONSchemaForAntigravity(structuredClone(fn.parameters))
-              : { type: "object", properties: { reason: { type: "string", description: "Brief explanation" } }, required: ["reason"] }
+              ? cleanJSONSchemaForAntigravity(structuredClone(fn.parameters), p => recordPlaceholderPaths(reasonPlaceholderMap, name, [p]))
+              : (() => { recordPlaceholderPaths(reasonPlaceholderMap, name, [[]]); return { type: "object", properties: { reason: { ...REASON_PLACEHOLDER_PROP } }, required: ["reason"] }; })()
           });
         }
       }
+      // Merge with any paths the request translator already recorded on this body.
+      registerReasonPlaceholders(body, reasonPlaceholderMap);
       tools = allDeclarations.length > 0 ? [{ functionDeclarations: allDeclarations }] : [];
     }
 

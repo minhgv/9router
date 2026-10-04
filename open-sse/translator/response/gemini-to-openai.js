@@ -7,6 +7,7 @@ import { reasoningDelta } from "../concerns/reasoning.js";
 import { encodeDataUri } from "../concerns/image.js";
 import { toOpenAIFinish } from "../concerns/finishReason.js";
 import { storeGeminiThoughtSignature } from "../../services/thoughtSignatureStore.js";
+import { stripReasonPlaceholders } from "../../utils/reasonPlaceholder.js";
 
 // Build chunk meta for current gemini state
 function chunkMeta(state) {
@@ -18,7 +19,15 @@ function emitFunctionCall(functionCall, state, signature = null) {
   const rawName = functionCall.name;
   // Restore original tool name from mapping (AG cloaking)
   const fcName = state.toolNameMap?.get(rawName) || rawName;
-  const fcArgs = functionCall.args || {};
+  // Strip the synthetic `reason` schema placeholder back out of the emitted
+  // args — it only exists on the wire to satisfy Antigravity VALIDATED mode
+  // (recorded per tool at translateRequest time); the client's own validator
+  // would reject it as an unexpected parameter.
+  const phMap = state?.reasonPlaceholderMap;
+  const rawArgs = functionCall.args || {};
+  const fcArgs = phMap?.has(rawName)
+    ? stripReasonPlaceholders(rawName, rawArgs, phMap)
+    : stripReasonPlaceholders(fcName, rawArgs, phMap);
   const toolCallIndex = state.functionIndex++;
   const callId = functionCall.id || `${fcName}-${Date.now()}-${toolCallIndex}`;
   if (signature) {

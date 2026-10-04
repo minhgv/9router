@@ -1,3 +1,8 @@
+# Unreleased
+
+## Fixes
+- **Antigravity/Gemini tools**: strip the synthetic `reason` placeholder from emitted tool-call arguments before they reach the client — the placeholder is injected on the wire because VALIDATED mode rejects object schemas with no `properties`, but clients validating tool calls against their own declared schema rejected it as `unexpected parameter reason` (ZCode `TodoRead`/`ListModels`/`CronList`, nested free-form maps like `AskUserQuestion.annotations`) — injection sites are now recorded per tool at translateRequest time and stripped in the response translators (`open-sse/utils/reasonPlaceholder.js`); upstream request shape unchanged
+
 # v0.5.88 (2026-10-04)
 
 ## Features

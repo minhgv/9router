@@ -1,6 +1,7 @@
 // Gemini helper functions for translator
 
 import { safeParseJSON } from "../concerns/json.js";
+import { REASON_PLACEHOLDER_PROP } from "../../utils/reasonPlaceholder.js";
 import { OPENAI_BLOCK } from "../schema/index.js";
 
 // Unsupported JSON Schema constraints that should be removed for Antigravity
@@ -378,7 +379,7 @@ function dereferenceSchema(schema, rootDefs = {}, visited = new Set()) {
 }
 
  // Clean JSON Schema for Antigravity API compatibility - removes unsupported keywords recursively
- export function cleanJSONSchemaForAntigravity(schema) {
+export function cleanJSONSchemaForAntigravity(schema, onPlaceholder = null) {
    if (!schema || typeof schema !== "object") return schema;
  
   // Dereference first (produces a fresh tree), then mutate directly
@@ -427,44 +428,51 @@ function dereferenceSchema(schema, rootDefs = {}, visited = new Set()) {
 
   cleanupRequired(cleaned);
 
-  // Phase 5: Add placeholder for empty object schemas (Antigravity requirement)
-  function addPlaceholders(obj) {
+  // Phase 5: Add placeholder for empty object schemas (Antigravity requirement).
+  // Antigravity VALIDATED mode rejects object schemas with no properties, so a
+  // synthetic `reason` field is injected. Because that field is not part of the
+  // client's declared schema it must be stripped from emitted tool-call args
+  // before the response goes back (see utils/reasonPlaceholder.js) — callers
+  // pass `onPlaceholder(argsSpacePath)` to record each injection site. Paths
+  // are expressed in args space: `items` → "*" (matches every element/key).
+  function addPlaceholders(obj, path) {
     if (!obj || typeof obj !== "object") return;
 
     // Empty schema {} (no type, no properties) after $ref removal — treat as object with placeholder
     if (Object.keys(obj).length === 0) {
       obj.type = "object";
-      obj.properties = {
-        reason: {
-          type: "string",
-          description: "Brief explanation of why you are calling this tool"
-        }
-      };
+      obj.properties = { reason: { ...REASON_PLACEHOLDER_PROP } };
       obj.required = ["reason"];
+      if (typeof onPlaceholder === "function") onPlaceholder(path);
       return;
     }
 
     if (obj.type === "object") {
       if (!obj.properties || Object.keys(obj.properties).length === 0) {
-        obj.properties = {
-          reason: {
-            type: "string",
-            description: "Brief explanation of why you are calling this tool"
-          }
-        };
+        obj.properties = { reason: { ...REASON_PLACEHOLDER_PROP } };
         obj.required = ["reason"];
+        if (typeof onPlaceholder === "function") onPlaceholder(path);
+        return;
       }
     }
 
-    // Recurse into nested objects
-    for (const value of Object.values(obj)) {
-      if (value && typeof value === "object") {
-        addPlaceholders(value);
+    // Recurse into nested schema objects, translating schema structure to
+    // args-space paths.
+    for (const [key, value] of Object.entries(obj)) {
+      if (!value || typeof value !== "object") continue;
+      if (key === "properties") {
+        for (const [propName, propSchema] of Object.entries(value)) {
+          addPlaceholders(propSchema, path.concat(propName));
+        }
+      } else if (key === "items") {
+        addPlaceholders(value, path.concat("*"));
+      } else {
+        addPlaceholders(value, path);
       }
     }
   }
 
-  addPlaceholders(cleaned);
+  addPlaceholders(cleaned, []);
 
   return cleaned;
 }

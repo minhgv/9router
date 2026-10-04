@@ -1,4 +1,4 @@
-# Unreleased
+# v0.5.88 (2026-10-04)
 
 ## Features
 - **Antigravity**: add Claude Opus 5.5 / Sonnet 5.5 models — six tiered wire ids (`claude-{opus,sonnet}-5-5-{low,medium,high}`) plus bare aliases routed to the medium tier; the thinking tier travels inside the wire id so no `thinkingConfig` is injected (capability patterns for `*claude*sonnet-5*` / `*claude-opus-5*` → 1M adaptive thinking); `claude-sonnet-4-6`, `claude-opus-4-6-thinking` and `gpt-oss-120b-medium` remain until their scheduled 2026-11-02 removal

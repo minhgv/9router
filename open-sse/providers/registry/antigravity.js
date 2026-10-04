@@ -68,6 +68,18 @@ export default {
     { id: "gemini-3.5-flash-extra-low", name: "Gemini 3.5 Flash (Low)" },
     { id: "gemini-pro-agent", name: "Gemini 3.1 Pro (High)" },
     { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)" },
+    // Claude 5.5 carries the thinking tier in the wire id itself (the Gemini
+    // 3.8 pattern) — claude-{opus,sonnet}-5-5-{low,medium,high}, no
+    // thinkingConfig from the executor (parity: antigravity-opencode models).
+    { id: "claude-opus-5-5-high", name: "Claude Opus 5.5 (High)" },
+    { id: "claude-opus-5-5-medium", name: "Claude Opus 5.5 (Medium)" },
+    { id: "claude-opus-5-5-low", name: "Claude Opus 5.5 (Low)" },
+    { id: "claude-opus-5-5", name: "Claude Opus 5.5", upstreamModelId: "claude-opus-5-5-medium" },
+    { id: "claude-sonnet-5-5-high", name: "Claude Sonnet 5.5 (High)" },
+    { id: "claude-sonnet-5-5-medium", name: "Claude Sonnet 5.5 (Medium)" },
+    { id: "claude-sonnet-5-5-low", name: "Claude Sonnet 5.5 (Low)" },
+    { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", upstreamModelId: "claude-sonnet-5-5-medium" },
+    // Still served as of 2026-10-04; official docs schedule removal 2026-11-02.
     { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)" },
     { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
     { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" },

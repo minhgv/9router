@@ -227,7 +227,7 @@ Dashboard path uses `providers/antigravity.js` `postExchange` (same loadCodeAssi
 
 ## 9. Models & Wire IDs
 
-Registry `models[]` (antigravity.js:47-77). Key mappings:
+Registry `models[]` (antigravity.js:47-88). Key mappings:
 
 | Dashboard id | Wire id (`upstreamModelId`) | Notes |
 |---|---|---|
@@ -236,8 +236,10 @@ Registry `models[]` (antigravity.js:47-77). Key mappings:
 | `gemini-3.7-flash-*`, `3.6-flash-*` | same | |
 | `gemini-3.5-flash-high` | `gemini-3-flash-agent` | 3.5 has no `-high` id; agent id IS the high tier |
 | `gemini-3.1-pro` | `gemini-pro-agent` | |
-| `claude-sonnet-4-6`, `claude-opus-4-6-thinking` | same | labels get `used_claude` |
-| `gpt-oss-120b-medium` | same | |
+| `claude-{opus,sonnet}-5-5-{high,medium,low}` | same | tier baked into wire id (Gemini 3.8 pattern); no thinkingConfig; labels get `used_claude` |
+| `claude-opus-5-5`, `claude-sonnet-5-5` | `…-5-5-medium` | default → medium |
+| `claude-sonnet-4-6`, `claude-opus-4-6-thinking` | same | labels get `used_claude`; removal scheduled 2026-11-02 |
+| `gpt-oss-120b-medium` | same | removal scheduled 2026-11-02 |
 | `gemini-3.1-flash-image` | same | `kind: "image"`, `imageGen: true`; suffix `-WxH` or `-AxB` → `imageConfig.aspectRatio` |
 
 `ANTIGRAVITY_WIRE_PROFILES` (executor:76) — only 5 ids have `model_enum` telemetry + raised `maxOutputTokens` (65536/65535); everything else caps at 64000.

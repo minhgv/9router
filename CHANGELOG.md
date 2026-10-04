@@ -1,8 +1,7 @@
 # Unreleased
 
 ## Features
-- **Codex**: sync the selected upstream catalog and CLI identity (`0.159.0`), add GPT-6.1 Sol and extended-context variants, preserve review/effort/context annotations during model resolution, and support GPT-6 Responses Lite with hosted-search fallback to standard Responses.
-- **Claude**: add Sonnet 5.5/adaptive thinking, preserve intentional prefill and upload-only user turns, cache final tool results within the four-marker budget, and restore tool names when a response loses its mapping.
+- **Antigravity**: add Claude Opus 5.5 / Sonnet 5.5 models — six tiered wire ids (`claude-{opus,sonnet}-5-5-{low,medium,high}`) plus bare aliases routed to the medium tier; the thinking tier travels inside the wire id so no `thinkingConfig` is injected (capability patterns for `*claude*sonnet-5*` / `*claude-opus-5*` → 1M adaptive thinking); `claude-sonnet-4-6`, `claude-opus-4-6-thinking` and `gpt-oss-120b-medium` remain until their scheduled 2026-11-02 removal
 - **Claude quota**: display available free-limit reset grants in Quota Tracker and redeem them through an authenticated, same-origin management endpoint with fixed upstream URLs and connection-scoped proxy policy.
 - **Devin**: collapse effort-tier siblings into logical variant models (`swe-2`, `claude-opus-5`, `gpt-5-6-terra`, … — 40 families ported from oh-my-pi's taxonomy) — `reasoning_effort` (`reasoning.effort` / `output_config.effort`), the `model(level)` suffix and short/dotted provider aliases (`dv/swe`, `swe-1.7`, `opus`) route to the sibling wire uid at request time with nearest-tier clamping; `requiresEffort` families land on the recommended default member instead of a nonexistent `-none` uid; raw sibling ids stay valid; per-family capabilities, pricing rows and thinking-level ladders added (`thinkingCanDisable:false` only where no off route exists)
 - **Usage**: add Cache Ratio column to the usage table (tokens view) — shows `cachedTokens / promptTokens` as a percentage per model/account/API key/endpoint, sortable via the column header
@@ -44,6 +43,12 @@
 - **Antigravity**: obfuscate server-flagged phrases in `systemInstruction` with a zero-width space (default `RFC 2119`; override via `ANTIGRAVITY_SENSITIVE_WORDS`, empty disables) and strip `google-antigravity/` branding — the upstream matcher answers these with a bare `429 RESOURCE_EXHAUSTED` indistinguishable from real quota
 - **Antigravity**: dereference internal JSON Schema `$ref`/`$defs`/`definitions` in tool parameters before cleaning (sibling keys win, cycle-safe) — previously a `$ref` node was stripped empty, losing the tool's real parameter shape; IDE version discovery is now lazy (first request) instead of firing a network fetch at module import
 - **Antigravity**: chat endpoint fallback chain `daily → daily-sandbox → production cloudcode-pa.googleapis.com`, failing over on `403`/`404` (in addition to 429/5xx) — accounts licensed only on PROD were dead-ending on the daily hosts' 404 "Requested entity was not found" / 403 "no valid license"
+# v0.5.87 (2026-10-02)
+
+## Features
+- **Codex**: sync the selected upstream catalog and CLI identity (`0.159.0`), add GPT-6.1 Sol and extended-context variants, preserve review/effort/context annotations during model resolution, and support GPT-6 Responses Lite with hosted-search fallback to standard Responses.
+- **Claude**: add Sonnet 5.5/adaptive thinking, preserve intentional prefill and upload-only user turns, cache final tool results within the four-marker budget, and restore tool names when a response loses its mapping.
+
 # v0.5.86 (2026-09-23)
 
 ## Features

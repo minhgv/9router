@@ -37,6 +37,7 @@ const CODEX_GPT_5_6_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh
 
 // Model-name pattern overrides (glob, first match wins) — more precise than format default.
 const PATTERN_THINKING = [
+  { pattern: "*claude-opus-5*",   levels: ["none", "low", "medium", "high", "xhigh", "max"] },
   { pattern: "*claude-sonnet-5-5*", levels: ["none", "low", "medium", "high", "xhigh", "max"] },
   { pattern: "*claude-sonnet-5*", levels: ["none", "low", "medium", "high", "xhigh", "max"] },
   { provider: "codex", pattern: "*gpt-6*", levels: CODEX_GPT_5_6_LEVELS },

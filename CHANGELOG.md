@@ -1,3 +1,8 @@
+# v0.5.92 (2026-10-14)
+
+## Fixes
++- **Pricing**: add `cached: 0.20`, `reasoning: 15.00`, and `cache_creation: 2.50` ($/1M) across all four `gemini-4-argon*` entries (`open-sse/providers/pricing.js`) so `calculateCostFromTokens` no longer falls back to the full `$2.00/1M` input rate on cached prompt tokens
+
 # v0.5.91 (2026-10-13)
 
 ## Features

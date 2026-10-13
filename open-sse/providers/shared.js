@@ -93,15 +93,17 @@ export const KIMI_CODING_BASE_URL = "https://api.kimi.com/coding/v1/messages";
 export const OPENAI_COMPAT_BASE = "https://api.openai.com/v1";
 export const ANTHROPIC_COMPAT_BASE = "https://api.anthropic.com/v1";
 
-// Official Antigravity IDE Desktop 2.23.0 fingerprint captured from macOS arm64.
-// Keep this static even when 9router runs on Linux: the provider profile is
-// intentionally matching the IDE client, not the server host. Chat traffic
+// Antigravity 2.23.0 `antigravity/hub` client fingerprint captured from macOS
+// arm64. The hub UA token is REQUIRED — the backend serves `antigravity/ide`
+// a stale model roster (no gemini-4-argon, 404 NOT_FOUND). Keep this static
+// even when 9router runs on Linux: the provider profile is intentionally
+// matching the captured hub client, not the server host. Chat traffic
 // resolves the live version at request time via utils/antigravityVersion.js
 // (env ANTIGRAVITY_IDE_VERSION → update manifest → this pinned fallback);
 // this constant stays the static fallback for OAuth/onboarding flows.
 export const ANTIGRAVITY_IDE_VERSION = "2.23.0";
 export const ANTIGRAVITY_IDE_BASE_URL = "https://daily-cloudcode-pa.googleapis.com";
-export const ANTIGRAVITY_IDE_USER_AGENT = `antigravity/ide/${ANTIGRAVITY_IDE_VERSION} darwin/arm64`;
+export const ANTIGRAVITY_IDE_USER_AGENT = `antigravity/hub/${ANTIGRAVITY_IDE_VERSION} (aidev_client; os_type=darwin; arch=arm64; cl=963137146)`;
 // Sandbox mirror of the daily host — failover target on 429/5xx (mirrors the
 // official client's endpoint fallback ordering: daily first, sandbox second).
 export const ANTIGRAVITY_SANDBOX_BASE_URL = "https://daily-cloudcode-pa.sandbox.googleapis.com";

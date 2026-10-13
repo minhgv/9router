@@ -276,7 +276,7 @@ describe("fetchAntigravityWeeklyQuota", () => {
         method: "POST",
         headers: expect.objectContaining({
           "Authorization": "Bearer token",
-          "User-Agent": "antigravity/ide/2.23.0 darwin/arm64",
+          "User-Agent": "antigravity/hub/2.23.0 (aidev_client; os_type=darwin; arch=arm64; cl=963137146)",
           "Content-Type": "application/json",
           "X-Client-Name": "antigravity",
         }),

@@ -125,13 +125,13 @@ Order of operations in `AntigravityExecutor.transformRequest` (executor:216):
 ```
 Content-Type: application/json
 Authorization: Bearer <accessToken>
-User-Agent: antigravity/ide/<version> darwin/arm64     ← dynamic, see below
+User-Agent: antigravity/hub/<version> (aidev_client; os_type=darwin; arch=arm64; cl=963137146)   ← dynamic version, see below
 x-request-source: local                              ← client parity
 Client-Metadata: ideType=ANTIGRAVITY,platform=MACOS,pluginType=GEMINI
 ```
 
-**Version tracking** (`utils/antigravityVersion.js`): backend gates model access on client version — a stale UA is itself a fingerprint.
-- Resolution order: `ANTIGRAVITY_IDE_VERSION` env → manifest-discovered → pinned `2.11.0` (`DEFAULT_ANTIGRAVITY_VERSION`, also `ANTIGRAVITY_IDE_VERSION` in shared.js).
+**Version + client tracking** (`utils/antigravityVersion.js`): the backend gates the model roster on BOTH the UA client token and version — `antigravity/ide/<ver>` is served a stale catalog without `gemini-4-argon-*` (404 NOT_FOUND verified live 2026-10-13), while `antigravity/hub/<ver>` unlocks it. The `cl` changelist is telemetry only (stale/absent still passes gating). Override fields via `ANTIGRAVITY_CL` / `ANTIGRAVITY_OS` / `ANTIGRAVITY_ARCH`.
+- Resolution order: `ANTIGRAVITY_IDE_VERSION` env → manifest-discovered → pinned `2.23.0` (`DEFAULT_ANTIGRAVITY_VERSION`, also `ANTIGRAVITY_IDE_VERSION` in shared.js).
 - Manifest: `https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml` (electron-builder YAML, `version:` line parsed).
 - **Lazy**: `ensureAntigravityVersion()` fires fire-and-forget inside `buildHeaders` — deliberately NOT in the constructor (singletons are built at import time; a constructor fetch pollutes tests and fires network on bare import). First request uses pinned version; later ones use discovered.
 - Discovery failure is silent; in-flight promise deduped; cleared on failure so next request retries.

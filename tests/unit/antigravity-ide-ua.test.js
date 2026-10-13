@@ -12,12 +12,12 @@ const credentials = { accessToken: "synthetic-token", projectId: "synthetic-proj
 describe("Antigravity version tracking", () => {
   it("falls back to the pinned version, env override wins", () => {
     expect(getAntigravityVersion()).toBe(DEFAULT_ANTIGRAVITY_VERSION);
-    expect(getAntigravityIdeUserAgent()).toBe(`antigravity/ide/${DEFAULT_ANTIGRAVITY_VERSION} darwin/arm64`);
+    expect(getAntigravityIdeUserAgent()).toBe(`antigravity/hub/${DEFAULT_ANTIGRAVITY_VERSION} (aidev_client; os_type=darwin; arch=arm64; cl=963137146)`);
 
     process.env.ANTIGRAVITY_IDE_VERSION = "9.9.9";
     try {
       expect(getAntigravityVersion()).toBe("9.9.9");
-      expect(getAntigravityIdeUserAgent()).toBe("antigravity/ide/9.9.9 darwin/arm64");
+      expect(getAntigravityIdeUserAgent()).toBe("antigravity/hub/9.9.9 (aidev_client; os_type=darwin; arch=arm64; cl=963137146)");
     } finally {
       delete process.env.ANTIGRAVITY_IDE_VERSION;
     }
@@ -33,11 +33,11 @@ describe("Antigravity version tracking", () => {
 });
 
 describe("Antigravity executor header parity", () => {
-  it("sends the IDE User-Agent plus x-request-source and Client-Metadata", () => {
+  it("sends the hub User-Agent plus x-request-source and Client-Metadata", () => {
     const executor = new AntigravityExecutor();
     const headers = executor.buildHeaders(credentials, true);
 
-    expect(headers["User-Agent"]).toMatch(/^antigravity\/ide\/\d+\.\d+\.\d+ darwin\/arm64$/);
+    expect(headers["User-Agent"]).toMatch(/^antigravity\/hub\/\d+\.\d+\.\d+ \(aidev_client; os_type=darwin; arch=arm64; cl=963137146\)$/);
     expect(headers["x-request-source"]).toBe("local");
     expect(headers["Client-Metadata"]).toBe("ideType=ANTIGRAVITY,platform=MACOS,pluginType=GEMINI");
     expect(headers["Authorization"]).toBe("Bearer synthetic-token");

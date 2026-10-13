@@ -14,9 +14,12 @@ function shouldRewriteMetadata(metadata) {
   return Object.prototype.hasOwnProperty.call(metadata, "ideVersion");
 }
 
+// Bump ONLY the version inside the client token — never drop it. The backend
+// gates the model roster on the token itself: `antigravity/hub/<v>` unlocks
+// gemini-4-argon-*, while a bare `antigravity/<v>` (or `ide`) 404s it.
 function rewriteAntigravityUserAgent(userAgent, version) {
   if (typeof userAgent !== "string" || !userAgent.includes("antigravity/")) return userAgent;
-  return userAgent.replace(/antigravity\/[^\s]+/, `antigravity/${version}`);
+  return userAgent.replace(/(antigravity\/[a-zA-Z]*\/?)[^\s;()]+/, `$1${version}`);
 }
 
 function applyAntigravityIdeVersionOverride(bodyBuffer, headers, requestUrl) {

@@ -1,6 +1,6 @@
 # Add gemini-4-argon (Antigravity 2.23.0 catalog sync)
 
-Work ID: `2026-10-13-gemini-4-argon` · Status: **complete** · Branch: `master` (fork, 108 ahead / 52 behind upstream)
+Work ID: `2026-10-13-gemini-4-argon` · Status: **complete** (UA fix landed same day, see addendum) · Branch: `master` (fork, 108 ahead / 52 behind upstream)
 
 ## Context
 
@@ -76,11 +76,26 @@ Single package per file, sequential edits — no parallel waves needed. Do NOT r
 Verification run 2026-10-13:
 - **AC-01..05 (vitest, via test-runner)**: `npx vitest run unit/gemini4-argon-caps.test.js unit/antigravity-ide-version.test.js unit/antigravity-ide-ua.test.js unit/antigravity-retry-hook.test.js unit/antigravity-usage-headers.test.js unit/antigravity-weekly-quota.test.js unit/antigravity-endpoint-failover.test.js unit/antigravity-mitm.test.js` → **71/71 passed** across 8 files. New test file mutation-pins the `*gemini-4*` pattern (removal fails the suite).
 - **AC-06**: `eslint` on touched files → 0 errors (1 pre-existing `import/no-anonymous-default-export` warning in registry/antigravity.js, present before this change). `tests/__baseline__/verify-providers.mjs` → "PROVIDERS byte-for-byte equal (84 providers)" after re-pinning baseline UA to 2.23.0.
-- **AC-07 (live smoke, direct upstream calls)**: refreshed the real `antigravity` OAuth token (account `minhgvmntn@gmail.com`, project `aicode-consumers`) and called `POST /v1internal:fetchAvailableModels` on daily + prod hosts → both 200, **argon absent** (26 daily / 35 prod model ids, none matching `argon|gemini-4`). Direct `streamGenerateContent` with `gemini-4-argon-medium` → **404 NOT_FOUND**. Conclusion: backend allowlist not yet enabled for this account; catalog is correct, calls self-heal on GA. Documented in CHANGELOG "Notes".
+- **AC-07 (live smoke, direct upstream calls)**: refreshed the real `antigravity` OAuth token (account `minhgvmntn@gmail.com`, project `aicode-consumers`) and called `POST /v1internal:fetchAvailableModels` on daily + prod hosts → both 200, **argon absent** (26 daily / 35 prod model ids, none matching `argon|gemini-4`). Direct `streamGenerateContent` with `gemini-4-argon-medium` → **404 NOT_FOUND**. Conclusion at the time: backend allowlist not yet enabled for this account. **Superseded — see AC-08.**
 - Official update manifest confirms `2.23.0` as the current release (`latest-arm64-mac.yml`), validating both version bumps.
 - Scope additions beyond plan: `providers/shared.js` + `utils/antigravityVersion.js` static UA fallbacks bumped to 2.23.0, and 4 test files + `providers-baseline.json` re-pinned 2.11.0 → 2.23.0.
 
-Residual risks: backend entitlement unknown until GA (mitigated — CHANGELOG note); `maxOutput: 65536` may under-claim if Argon truly ships 1M output; audio/video may be added by Google later. Out-of-scope 2.23.0 catalog models (`gemini-3.1-ultra`, `claude-opus-4-8`, `gpt-oss-*-maas`) not added.
+## Addendum 2026-10-13 (evening): root cause was the User-Agent client token, not backend GA
+
+User reported argon still broken; cross-referenced `~/code/GitHub/oh-my-pi` (`pi-catalog`, verified working). Live bisect on the same account/project:
+
+| UA sent | `fetchAvailableModels` | `generateContent gemini-4-argon-medium` |
+|---|---|---|
+| `antigravity/ide/2.23.0 darwin/arm64` (old pin) | 200, 26 ids, **no argon** | **404 NOT_FOUND** |
+| `antigravity/2.23.0` (bare token — what the MITM rewrite produced) | — | **404 NOT_FOUND** |
+| `antigravity/hub/2.23.0 (aidev_client; os_type=darwin; arch=arm64; cl=963137146)` | 200, 29 ids, **argon present** | **200 OK** (+ streamGenerateContent SSE returns `OK`, `modelVersion: gemini-4-argon`) |
+
+- **AC-08**: daily + sandbox 404 argon under `ide`; prod 429s account-wide under minimal probes (control `gemini-3.8-flash-medium` also 429 — prod gating, not argon-specific). `loadCodeAssist` accepts both UA forms (200). `retrieveUserQuotaSummary` shows ~95% weekly remaining → 429s are gating fingerprints, not quota.
+- **Fix landed**: `ANTIGRAVITY_IDE_USER_AGENT` (shared.js) + `getAntigravityIdeUserAgent()` → `antigravity/hub/<ver> (aidev_client; os_type=darwin; arch=arm64; cl=963137146)` with `ANTIGRAVITY_CL/OS/ARCH` env overrides; `src/mitm/antigravityIdeVersion.js` regex fixed to bump only the version and preserve the `hub`/`ide` client token (bare-token output 404s argon). Tests re-pinned (4 UA assertions + baseline json + new token-preservation test); docs (ANTIGRAVITY.md, CHANGELOG v0.5.90) updated.
+- **Verification**: vitest 8 antigravity files → 71/71 pass; eslint clean; `verify-providers.mjs` byte-for-byte equal (84 providers); live `streamGenerateContent` 200 on `gemini-4-argon-low`/`medium`/`high`.
+- Parity reference: `oh-my-pi/packages/catalog/src/wire/gemini-headers.ts:111-119` (`antigravity/hub` UA) and wire profiles `:158-160` (argon `maxOutputTokens: 65536`, no `modelEnum` — matches our under-claim).
+
+Residual risks: none for entitlement — argon live-verified 200 under the hub UA. `maxOutput: 65536` may under-claim if Argon truly ships 1M output; audio/video may be added by Google later. Out-of-scope 2.23.0 catalog models (`gemini-3.1-ultra`, `claude-opus-4-8`, `gpt-oss-*-maas`) not added.
 
 ## Assumptions and contingencies
 

@@ -20,9 +20,16 @@ export function getAntigravityVersion() {
   return process.env.ANTIGRAVITY_IDE_VERSION || discoveredAntigravityVersion || DEFAULT_ANTIGRAVITY_VERSION;
 }
 
-/** Current IDE User-Agent string (`antigravity/ide/<version> darwin/arm64`). */
+/** Current client User-Agent (`antigravity/hub/<version> (aidev_client; …)`).
+ * The backend gates the model roster on the UA client token — `antigravity/ide`
+ * is served a stale catalog without gemini-4-argon (404 NOT_FOUND), while the
+ * real `antigravity/hub` client string unlocks it. `cl` is telemetry only
+ * (verified live: stale/absent cl still passes gating; version is what gates). */
 export function getAntigravityIdeUserAgent() {
-  return `antigravity/ide/${getAntigravityVersion()} darwin/arm64`;
+  const cl = process.env.ANTIGRAVITY_CL || "963137146";
+  const os = process.env.ANTIGRAVITY_OS || "darwin";
+  const arch = process.env.ANTIGRAVITY_ARCH || "arm64";
+  return `antigravity/hub/${getAntigravityVersion()} (aidev_client; os_type=${os}; arch=${arch}; cl=${cl})`;
 }
 
 /**

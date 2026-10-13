@@ -55,6 +55,22 @@ describe("Antigravity IDE version override", () => {
     }
   );
 
+  it("preserves the UA client token — only the version is bumped", () => {
+    const { bodyBuffer, headers } = makeRequest();
+    headers["user-agent"] = "antigravity/hub/2.11.0 (aidev_client; os_type=darwin; arch=arm64; cl=963137146)";
+
+    const result = applyAntigravityIdeVersionOverride(
+      bodyBuffer,
+      headers,
+      "/v1internal/models/gemini-4-argon-medium:streamGenerateContent"
+    );
+
+    // Dropping `hub` to a bare `antigravity/<v>` 404s gemini-4-argon upstream.
+    expect(result.headers["user-agent"]).toBe(
+      `antigravity/hub/${ANTIGRAVITY_IDE_VERSION} (aidev_client; os_type=darwin; arch=arm64; cl=963137146)`
+    );
+  });
+
   it("preserves malformed non-generation request content byte-for-byte", () => {
     const bodyBuffer = Buffer.from([0xff, 0x00, 0x7b, 0x6e, 0x6f, 0x74, 0x2d, 0x6a, 0x73, 0x6f, 0x6e]);
     const headers = {

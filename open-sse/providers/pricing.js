@@ -63,13 +63,14 @@ export const MODEL_PRICING = {
   "o1-mini":                      { input: 3.00,  output: 12.00, cached: 1.50,  reasoning: 18.00,  cache_creation: 3.00  },
 
   // === Gemini ===
-  // Gemini 4 "Argon" (2026-09-30). Input/output via Artificial Analysis;
-  // cached / reasoning / cache_creation unpublished — left off rather than
-  // guessed (entries are returned verbatim; a fabricated 0 would mis-bill).
-  "gemini-4-argon":                { input: 2.00,  output: 10.00 },
-  "gemini-4-argon-high":           { input: 2.00,  output: 10.00 },
-  "gemini-4-argon-medium":         { input: 2.00,  output: 10.00 },
-  "gemini-4-argon-low":            { input: 2.00,  output: 10.00 },
+  // Gemini 4 "Argon" (2026-09-30). Input/output ($2/$10 per 1M) via Artificial
+  // Analysis; cached (0.1× input), reasoning (1.5× output), cache_creation
+  // (1.25× input) follow the standard Gemini 3.x multipliers so cached prompt
+  // tokens aren't billed at the full input rate by calculateCostFromTokens.
+  "gemini-4-argon":                { input: 2.00,  output: 10.00, cached: 0.20,  reasoning: 15.00,  cache_creation: 2.50  },
+  "gemini-4-argon-high":           { input: 2.00,  output: 10.00, cached: 0.20,  reasoning: 15.00,  cache_creation: 2.50  },
+  "gemini-4-argon-medium":         { input: 2.00,  output: 10.00, cached: 0.20,  reasoning: 15.00,  cache_creation: 2.50  },
+  "gemini-4-argon-low":            { input: 2.00,  output: 10.00, cached: 0.20,  reasoning: 15.00,  cache_creation: 2.50  },
   "gemini-3.8-flash":              { input: 1.50,  output: 7.50,  cached: 0.15,  reasoning: 11.25,  cache_creation: 1.875 },
   "gemini-3.8-flash-high":         { input: 1.50,  output: 7.50,  cached: 0.15,  reasoning: 11.25,  cache_creation: 1.875 },
   "gemini-3.8-flash-medium":       { input: 1.50,  output: 7.50,  cached: 0.15,  reasoning: 11.25,  cache_creation: 1.875 },

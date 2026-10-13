@@ -97,19 +97,16 @@ describe("gemini-4-argon registry (antigravity)", () => {
 });
 
 describe("gemini-4-argon pricing", () => {
-  it("carries the confirmed input/output rates on every tier", () => {
+  it("carries full pricing rates on every tier so cached tokens are not billed at full input rate", () => {
     for (const id of ARGON_IDS) {
       const p = getPricingForModel("antigravity", id);
-      expect(p?.input, id).toBe(2.00);
-      expect(p?.output, id).toBe(10.00);
+      expect(p, id).toEqual({
+        input: 2.00,
+        output: 10.00,
+        cached: 0.20,
+        reasoning: 15.00,
+        cache_creation: 2.50,
+      });
     }
-  });
-
-  it("does not invent unpublished cache/reasoning rates", () => {
-    const p = getPricingForModel("antigravity", "gemini-4-argon");
-    // Absent, not a fabricated number — a 0 here would silently mis-bill.
-    expect("cached" in p).toBe(false);
-    expect("reasoning" in p).toBe(false);
-    expect("cache_creation" in p).toBe(false);
   });
 });

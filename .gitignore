@@ -102,3 +102,6 @@ debug.log
 
 # SOT-Graph local knowledge cache
 .sot/
+
+# npm publish artifacts (built tarballs never committed)
+*.tgz

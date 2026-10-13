@@ -63,6 +63,13 @@ export const MODEL_PRICING = {
   "o1-mini":                      { input: 3.00,  output: 12.00, cached: 1.50,  reasoning: 18.00,  cache_creation: 3.00  },
 
   // === Gemini ===
+  // Gemini 4 "Argon" (2026-09-30). Input/output via Artificial Analysis;
+  // cached / reasoning / cache_creation unpublished — left off rather than
+  // guessed (entries are returned verbatim; a fabricated 0 would mis-bill).
+  "gemini-4-argon":                { input: 2.00,  output: 10.00 },
+  "gemini-4-argon-high":           { input: 2.00,  output: 10.00 },
+  "gemini-4-argon-medium":         { input: 2.00,  output: 10.00 },
+  "gemini-4-argon-low":            { input: 2.00,  output: 10.00 },
   "gemini-3.8-flash":              { input: 1.50,  output: 7.50,  cached: 0.15,  reasoning: 11.25,  cache_creation: 1.875 },
   "gemini-3.8-flash-high":         { input: 1.50,  output: 7.50,  cached: 0.15,  reasoning: 11.25,  cache_creation: 1.875 },
   "gemini-3.8-flash-medium":       { input: 1.50,  output: 7.50,  cached: 0.15,  reasoning: 11.25,  cache_creation: 1.875 },

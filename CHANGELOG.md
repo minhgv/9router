@@ -1,3 +1,12 @@
+# v0.5.90 (2026-10-13)
+
+## Features
+- **Antigravity**: add Gemini 4 "Argon" catalog — four wire ids (`gemini-4-argon{,-high,-medium,-low}`, base maps to Medium) verified from the Antigravity IDE 2.23.0 `language_server` binary; conservative capabilities (`*gemini-4*` pattern: vision+reasoning+search, `gemini-level` thinking, 1M ctx, 64K output — audio/video and the unpublished output figure deliberately unclaimed) and input/output pricing ($2/$10 per 1M via Artificial Analysis; unpublished cache/reasoning rates left absent rather than fabricated). Also exposed in the MITM tool's modelAliases/defaultModels
+- **Antigravity**: bump IDE fingerprint to 2.23.0 — MITM rewrite pin (`src/mitm/antigravityIdeVersion.js`), pinned UA fallback (`providers/shared.js`, `utils/antigravityVersion.js`) now match the official update manifest (`latest-arm64-mac.yml` → 2.23.0)
+
+## Notes
+- **Argon availability**: the model ids are in the router catalog ahead of backend GA — `fetchAvailableModels` does not yet list them for this OAuth account and a direct `streamGenerateContent` returns 404; requests will self-heal once Google enables the account (pre-release model, announced 2026-09-30)
+
 # v0.5.89 (2026-10-04)
 
 ## Fixes

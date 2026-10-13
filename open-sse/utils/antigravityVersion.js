@@ -6,7 +6,7 @@
 // latest released version. (Parity: antigravity-opencode transport/version.ts.)
 
 /** Pinned fallback when the update manifest is unreachable. */
-export const DEFAULT_ANTIGRAVITY_VERSION = "2.11.0";
+export const DEFAULT_ANTIGRAVITY_VERSION = "2.23.0";
 
 const ANTIGRAVITY_VERSION_MANIFEST_URL =
   "https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/manifest/latest-arm64-mac.yml";

@@ -49,6 +49,13 @@ export default {
     // synthetic "(tier)" suffix — those 404 on daily-cloudcode-pa). The
     // thinking tier now travels in generationConfig.thinkingConfig.thinkingLevel
     // injected by the executor. (Parity: antigravity-opencode wire-profiles.)
+    // Gemini 4 "Argon" (2026-09-30). Wire ids verified from the Antigravity
+    // IDE 2.23.0 language_server binary — literal tiered ids like the 3.8
+    // line, no "-tiered" umbrella id. Base id maps to Medium (parity: 3.8-flash).
+    { id: "gemini-4-argon", name: "Gemini 4 Argon", upstreamModelId: "gemini-4-argon-medium" },
+    { id: "gemini-4-argon-high", name: "Gemini 4 Argon (High)", upstreamModelId: "gemini-4-argon-high" },
+    { id: "gemini-4-argon-medium", name: "Gemini 4 Argon (Medium)", upstreamModelId: "gemini-4-argon-medium" },
+    { id: "gemini-4-argon-low", name: "Gemini 4 Argon (Low)", upstreamModelId: "gemini-4-argon-low" },
     { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", upstreamModelId: "gemini-3.8-flash-high" },
     { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)", upstreamModelId: "gemini-3.8-flash-medium" },
     { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)", upstreamModelId: "gemini-3.8-flash-low" },

@@ -45,7 +45,7 @@ const PROD = "https://cloudcode-pa.googleapis.com";
 
 describe("Antigravity endpoint fallback chain", () => {
   beforeEach(() => {
-    process.env.ANTIGRAVITY_IDE_VERSION = "2.11.0";
+    process.env.ANTIGRAVITY_IDE_VERSION = "2.23.0";
     egress.length = 0;
     responder = null;
     fetchMock.mockClear();

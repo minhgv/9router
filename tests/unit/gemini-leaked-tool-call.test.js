@@ -246,4 +246,21 @@ describe("Gemini leaked default_api tool call healing", () => {
     expect(["tool_calls", "stop", "length", "content_filter"]).toContain(res.choices[0].finish_reason);
     expect(res.choices[0].finish_reason).toBe("tool_calls");
   });
+
+  it("healed call reuses the orphan tool_call_id so the real result pairs", () => {
+    const result = openaiToAntigravityRequest("gemini-4-argon", {
+      tools: [{ type: "function", function: { name: "grep", description: "Search", parameters: { type: "object", properties: { i: { type: "string" }, path: { type: "string" } } } } }],
+      messages: [
+        { role: "user", content: "list files in src" },
+        { role: "assistant", content: "Searching now 하려コール{default_api:grep{i:check,path:src}}" },
+        { role: "tool", tool_call_id: "call_1", content: "a.ts" },
+        { role: "user", content: "done?" },
+      ],
+    }, true, { projectId: "project-test", _clientSessionId: "session-test" });
+    const parts = result.request.contents.flatMap(c => c.parts);
+    const fresp = parts.find(p => p.functionResponse);
+    expect(fresp.functionResponse.id).toBe("call_1");
+    expect(fresp.functionResponse.name).toBe("grep");
+    expect(JSON.stringify(fresp.functionResponse.response)).toContain("a.ts");
+  });
 });

@@ -107,16 +107,23 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
       }
     }
   }
-
-  // Build tool responses cache
+  // Build tool responses cache (id -> result) and the queue of orphan tool
+  // messages: ids that belong to a client tool response but match no declared
+  // assistant tool_calls — exactly the shape a leaked `default_api` call leaves
+  // behind. Healed calls reuse these ids so the real result pairs up.
   const toolResponses = {};
+  const orphanToolIds = [];
   if (body.messages && Array.isArray(body.messages)) {
     for (const msg of body.messages) {
       if (msg.role === ROLE.TOOL && msg.tool_call_id) {
         toolResponses[msg.tool_call_id] = msg.content;
+        if (!tcID2Name[msg.tool_call_id]) orphanToolIds.push(msg.tool_call_id);
       }
     }
   }
+  // tcID2Name was built from the raw history; remove orphan ids that will be
+  // consumed by healed calls so their keys don't linger. (Lookup, not mutation —
+  // healed ids are read off orphanToolIds at build time.)
 
   // Convert messages
   if (body.messages && Array.isArray(body.messages)) {
@@ -154,15 +161,21 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
             parts.push({ text: sanitized.text });
           }
           if (sanitized.toolCalls.length > 0) {
-            // Re-shape recovered calls into the OpenAI tool_calls entries the loop
-            // below expects: id echoes emitFunctionCall (`<name>-<ts>-<msg>-<idx>`) so
-            // functionResponse name resolution still recovers it, and `function`
-            // carries the wire payload.
+            // Re-shape recovered calls into OpenAI tool_calls entries the loop
+            // below expects. id MUST stay `<name>-<ts>-<idx>` — the fid→name
+            // fallback strips the last 2 dash segments, so a 4th segment poisons
+            // functionResponse.name and trips upstream 400s. When the history
+            // carries orphan tool messages (results never paired with a call —
+            // the leaked-call signature), reuse their ids so the real result
+            // threads through instead of a synthesized empty response.
             const healed = sanitized.toolCalls.map((tc, idx) => ({
-              id: `${tc.name}-${Date.now()}-${i}-${idx}`,
+              id: orphanToolIds.length > 0 ? orphanToolIds.shift() : `${tc.name}-${Date.now()}-${idx}`,
               type: OPENAI_BLOCK.FUNCTION,
               function: { name: tc.name, arguments: JSON.stringify(tc.args ?? {}) },
             }));
+            // Register healed ids so functionResponse name resolution gets the
+            // real tool name (orphan ids like `call_1` don't encode it).
+            for (const tc of healed) tcID2Name[tc.id] = tc.function.name;
             msg.tool_calls = [...(Array.isArray(msg.tool_calls) ? msg.tool_calls : []), ...healed];
             msg.content = sanitized.text; // consumed; do not re-extract on retry
           }

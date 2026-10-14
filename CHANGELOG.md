@@ -1,3 +1,8 @@
+# v0.5.94 (2026-10-14)
+
+## Fixes
+- **Antigravity/Gemini**: heal leaked `default_api` tool calls emitted as pseudo-syntax text (`하려コール{default_api:…}`) across streaming and non-streaming responses (including mid-token SSE splits and `MALFORMED_FUNCTION_CALL` finish reasons), sanitize leaked assistant tool text in request history before replay, use `DEFAULT_THINKING_AG_SIGNATURE` with `cachedSig > explicit > fallback` precedence on first tool call only, let tiered wire IDs own `thinkingLevel` (clamping `MINIMAL` to `LOW` on Gemini >= 3.7 and defaulting bare `gemini-4-argon` to `MEDIUM`), set `maxOutputTokens: 65536` for `gemini-4-argon*` and `gemini-3.8-flash*`, and accept `max_completion_tokens` plus multiple `system`/`developer` instructions
+
 # v0.5.93 (2026-10-14)
 
 ## Fixes

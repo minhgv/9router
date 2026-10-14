@@ -17,7 +17,7 @@ const {
 } = await import("../../open-sse/services/thoughtSignatureStore.js");
 const { openaiToAntigravityRequest } = await import("../../open-sse/translator/request/openai-to-gemini.js");
 const { geminiToOpenAIResponse } = await import("../../open-sse/translator/response/gemini-to-openai.js");
-const { DEFAULT_THINKING_GEMINI_CLI_SIGNATURE } = await import("../../open-sse/config/defaultThinkingSignature.js");
+const { DEFAULT_THINKING_AG_SIGNATURE, DEFAULT_THINKING_GEMINI_CLI_SIGNATURE } = await import("../../open-sse/config/defaultThinkingSignature.js");
 
 let n = 0;
 const uid = (p) => `${p}_${Date.now()}_${n++}`;
@@ -85,7 +85,7 @@ describe("antigravity thought signatures are scoped to the model family", () => 
     const call = uid("toolu_vrtx");
     storeGeminiThoughtSignature(call, "CLAUDE_SIG", null, "claude-opus-4-6-thinking");
     const req = openaiToAntigravityRequest("gemini-3.8-flash-tiered", toolHistory(call), true);
-    expect(functionCallSignatures(req)).toEqual([DEFAULT_THINKING_GEMINI_CLI_SIGNATURE]);
+    expect(functionCallSignatures(req)).toEqual([DEFAULT_THINKING_AG_SIGNATURE]);
   });
 
   it("switching Gemini -> Claude mid-conversation does not replay Gemini's signature", () => {

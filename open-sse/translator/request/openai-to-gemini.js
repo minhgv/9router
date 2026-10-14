@@ -7,6 +7,32 @@ function generateUUID() {
   return crypto.randomUUID();
 }
 
+import { extractLeakedGeminiToolCalls } from "../response/gemini-to-openai.js";
+// Assistant text leaked a Gemini internal tool call (e.g. `하려コール{default_api:...}`) when
+// the upstream control token slips. Recovered calls replay as `tool_calls`; residual prose
+// stays as text so history poisoning doesn't propagate the pseudo-syntax on resume.
+function sanitizeAssistantContent(content) {
+  if (typeof content === "string") {
+    const { cleanedText, toolCalls } = extractLeakedGeminiToolCalls(content, true);
+    return { text: cleanedText, toolCalls };
+  }
+  if (!Array.isArray(content)) return { text: extractTextContent(content), toolCalls: [] };
+
+  const textParts = [];
+  const toolCalls = [];
+  for (const item of content) {
+    if (item?.type === OPENAI_BLOCK.TEXT && typeof item.text === "string") {
+      const { cleanedText, toolCalls: extracted } = extractLeakedGeminiToolCalls(item.text, true);
+      if (cleanedText) textParts.push(cleanedText);
+      toolCalls.push(...extracted);
+      continue;
+    }
+    const extracted = extractTextContent([item]);
+    if (extracted) textParts.push(extracted);
+  }
+  return { text: textParts.join(""), toolCalls };
+}
+
 import {
   DEFAULT_SAFETY_SETTINGS,
   convertOpenAIContentToParts,
@@ -56,9 +82,17 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
   if (body.top_k !== undefined) {
     result.generationConfig.topK = body.top_k;
   }
-  if (body.max_tokens !== undefined) {
-    result.generationConfig.maxOutputTokens = body.max_tokens;
+  const requestedMaxOutputTokens = body.max_completion_tokens ?? body.max_tokens;
+  if (requestedMaxOutputTokens !== undefined) {
+    result.generationConfig.maxOutputTokens = requestedMaxOutputTokens;
   }
+
+  const addSystemInstructionPart = (text) => {
+    if (!text) return;
+    result.systemInstruction ??= { role: GEMINI_ROLE.USER, parts: [] };
+    result.systemInstruction.parts.push({ text });
+  };
+
 
   // Build tool_call_id -> name map
   const tcID2Name = {};
@@ -90,13 +124,10 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
       const msg = body.messages[i];
       const role = msg.role;
       const content = msg.content;
-
-      if (role === ROLE.SYSTEM && body.messages.length > 1) {
-        result.systemInstruction = {
-          role: GEMINI_ROLE.USER,
-          parts: [{ text: typeof content === "string" ? content : extractTextContent(content) }]
-        };
-      } else if (role === ROLE.USER || (role === ROLE.SYSTEM && body.messages.length === 1)) {
+      const isSystemLike = role === ROLE.SYSTEM || role === "developer";
+      if (isSystemLike && body.messages.length > 1) {
+        addSystemInstructionPart(typeof content === "string" ? content : extractTextContent(content));
+      } else if (role === ROLE.USER || isSystemLike) {
         const parts = convertOpenAIContentToParts(content);
         if (parts.length > 0) {
           result.contents.push({ role: GEMINI_ROLE.USER, parts });
@@ -116,18 +147,35 @@ function openaiToGeminiBase(model, body, stream, signature = DEFAULT_THINKING_AG
           });
         }
 
+
         if (content) {
-          const text = typeof content === "string" ? content : extractTextContent(content);
-          if (text) {
-            parts.push({ text });
+          const sanitized = sanitizeAssistantContent(content);
+          if (sanitized.text) {
+            parts.push({ text: sanitized.text });
           }
+          if (sanitized.toolCalls.length > 0) {
+            // Re-shape recovered calls into the OpenAI tool_calls entries the loop
+            // below expects: id echoes emitFunctionCall (`<name>-<ts>-<msg>-<idx>`) so
+            // functionResponse name resolution still recovers it, and `function`
+            // carries the wire payload.
+            const healed = sanitized.toolCalls.map((tc, idx) => ({
+              id: `${tc.name}-${Date.now()}-${i}-${idx}`,
+              type: OPENAI_BLOCK.FUNCTION,
+              function: { name: tc.name, arguments: JSON.stringify(tc.args ?? {}) },
+            }));
+            msg.tool_calls = [...(Array.isArray(msg.tool_calls) ? msg.tool_calls : []), ...healed];
+            msg.content = sanitized.text; // consumed; do not re-extract on retry
+          }
+
         }
 
+
         if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+
           const toolCallIds = [];
           let firstFunctionCallSeen = false;
           for (const tc of msg.tool_calls) {
-            if (tc.type !== OPENAI_BLOCK.FUNCTION) continue;
+            if (tc.type !== OPENAI_BLOCK.FUNCTION && tc.type !== "function_call") continue;
 
             const args = tryParseJSON(tc.function?.arguments || "{}");
             const cachedSig = tc.id ? getGeminiThoughtSignatureSync(tc.id, sessionId, model) : null;
@@ -244,26 +292,9 @@ export function openaiToGeminiRequest(model, body, stream, credentials = null) {
 
 // OpenAI -> Gemini CLI (Cloud Code Assist)
 export function openaiToGeminiCLIRequest(model, body, stream, credentials = null) {
-  const gemini = openaiToGeminiBase(model, body, stream, DEFAULT_THINKING_GEMINI_CLI_SIGNATURE, credentials?._clientSessionId);
+  const gemini = openaiToGeminiBase(model, body, stream, DEFAULT_THINKING_AG_SIGNATURE, credentials?._clientSessionId);
   // Thinking is normalized centrally by applyThinking (thinkingUnified.js) after translation.
 
-  // Clean schema for tools
-  if (gemini.tools?.[0]?.functionDeclarations) {
-    const map = takeReasonPlaceholderMap(gemini) || new Map();
-    for (const fn of gemini.tools[0].functionDeclarations) {
-      if (fn.parameters) {
-        const cleanedSchema = cleanJSONSchemaForAntigravity(fn.parameters, p => recordPlaceholderPaths(map, fn.name, [p]));
-        fn.parameters = cleanedSchema;
-        // if (isClaude) {
-        //   fn.parameters = cleanedSchema;
-        // } else {
-        //   fn.parametersJsonSchema = cleanedSchema;
-        //   delete fn.parameters;
-        // }
-      }
-    }
-    attachReasonPlaceholderMap(gemini, map);
-  }
 
   return gemini;
 }
@@ -455,7 +486,7 @@ export function openaiToAntigravityRequest(model, body, stream, credentials = nu
     return wrapInCloudCodeEnvelopeForClaude(model, claudeRequest, credentials);
   }
 
-  const geminiCLI = openaiToGeminiCLIRequest(model, body, stream);
+  const geminiCLI = openaiToGeminiCLIRequest(model, body, stream, credentials);
   return wrapInCloudCodeEnvelope(model, geminiCLI, credentials, true);
 }
 

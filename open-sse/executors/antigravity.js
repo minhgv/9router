@@ -7,7 +7,8 @@ import { resolveSessionId, toNumericSessionId } from "../utils/sessionManager.js
 import { proxyAwareFetch, deriveConnectionProxyOptions } from "../utils/proxyFetch.js";
 import { cleanJSONSchemaForAntigravity, normalizeGeminiContents } from "../translator/formats/gemini.js";
 import { REASON_PLACEHOLDER_PROP, recordPlaceholderPaths, registerReasonPlaceholders } from "../utils/reasonPlaceholder.js";
-import { DEFAULT_THINKING_AG_SIGNATURE } from "../config/defaultThinkingSignature.js";
+import { DEFAULT_THINKING_AG_SIGNATURE, DEFAULT_THINKING_GEMINI_CLI_SIGNATURE } from "../config/defaultThinkingSignature.js";
+
 import { getGeminiThoughtSignatureSync } from "../services/thoughtSignatureStore.js";
 import { ensureAntigravityVersion, getAntigravityIdeUserAgent } from "../utils/antigravityVersion.js";
 
@@ -62,14 +63,34 @@ const stripBlacklisted = obj => {
 // official client (wire ids no longer carry a synthetic "(tier)" suffix).
 // "agent"/pro ids are the High tier; MINIMAL is never emitted (it 400s on
 // gemini >= 3.7). (Parity: antigravity-opencode thinking.ts.)
-function resolveAntigravityThinkingLevel(model) {
+function resolveAntigravityThinkingLevel(model, existingLevel = null) {
   const id = String(model || "");
   if (!id.startsWith("gemini-") || id.includes("image")) return null;
-  if (/^gemini-(pro-agent|3-flash-agent)$/.test(id) || id.endsWith("-high")) return "HIGH";
-  if (id.endsWith("-extra-low") || id.endsWith("-low")) return "LOW";
-  if (id.endsWith("-medium")) return "MEDIUM";
-  return null;
+
+  const VALID_LEVELS = new Set(["LOW", "MEDIUM", "HIGH"]);
+  const normalizeLevel = (level) => {
+    if (typeof level !== "string" || !level) return null;
+    // Gemini >= 3.7 / 4.0 rejects MINIMAL (400) — clamp to LOW.
+    const normalized = level.toUpperCase() === "MINIMAL" ? "LOW" : level.toUpperCase();
+    return VALID_LEVELS.has(normalized) ? normalized : null;
+  };
+
+  // Wire-id tier owns the level; the translator's client-supplied level
+  // (applyThinking) only fills in when the wire id carries no tier.
+  const wireLevel = (() => {
+    if (/^gemini-4-argon(?:-low|-medium|-high)?$/.test(id)) {
+      if (id.endsWith("-high")) return "HIGH";
+      if (id.endsWith("-low")) return "LOW";
+      return "MEDIUM";
+    }
+    if (/^gemini-(pro-agent|3-flash-agent)$/.test(id) || id.endsWith("-high")) return "HIGH";
+    if (id.endsWith("-extra-low") || id.endsWith("-low")) return "LOW";
+    if (id.endsWith("-medium")) return "MEDIUM";
+    return null;
+  })();
+  return wireLevel ?? normalizeLevel(existingLevel);
 }
+
 
 // Per-wire-id profile constants captured from the real antigravity/hub client:
 // `labels.model_enum` telemetry tokens and the per-model maxOutputTokens
@@ -81,7 +102,16 @@ const ANTIGRAVITY_WIRE_PROFILES = {
   "gemini-3-flash-agent": { modelEnum: "MODEL_PLACEHOLDER_M132", maxOutputTokens: 65536 },
   "gemini-3.1-pro-low": { modelEnum: "MODEL_PLACEHOLDER_M36", maxOutputTokens: 65535 },
   "gemini-pro-agent": { modelEnum: "MODEL_PLACEHOLDER_M16", maxOutputTokens: 65535 },
+  "gemini-4-argon": { maxOutputTokens: 65536 },
+  "gemini-4-argon-low": { maxOutputTokens: 65536 },
+  "gemini-4-argon-medium": { maxOutputTokens: 65536 },
+  "gemini-4-argon-high": { maxOutputTokens: 65536 },
+  "gemini-3.8-flash": { maxOutputTokens: 65536 },
+  "gemini-3.8-flash-low": { maxOutputTokens: 65536 },
+  "gemini-3.8-flash-medium": { maxOutputTokens: 65536 },
+  "gemini-3.8-flash-high": { maxOutputTokens: 65536 },
 };
+
 
 // Client-style request.labels: trajectory tracking + model telemetry. Must live
 // in request.labels — a root-level `labels` on the envelope 400s upstream.
@@ -289,18 +319,22 @@ export class AntigravityExecutor extends BaseExecutor {
       // Gemini 3+ rejects functionCall parts without thoughtSignature. Clients (Claude Code, IDE)
       // don't persist thoughtSignature in their history, so backfill from cache or default signature.
       // In parallel function calls, only the first call needs a signature; siblings stay unsigned.
+      // cachedSig (resolved under the sessionId at line 272) must take precedence over
+      // pre-populated default signatures injected during request translation.
       let firstFunctionCallSeen = false;
       const modifiedParts = parts?.map(p => {
         if (!p.functionCall) return p;
         const callId = p.functionCall.id;
         const cachedSig = callId ? getGeminiThoughtSignatureSync(callId, sessionId, body.model || model) : null;
-        const callSig = p.thoughtSignature || cachedSig || (!firstFunctionCallSeen ? DEFAULT_THINKING_AG_SIGNATURE : undefined);
+        const isDefaultSig = p.thoughtSignature === DEFAULT_THINKING_AG_SIGNATURE || p.thoughtSignature === DEFAULT_THINKING_GEMINI_CLI_SIGNATURE;
+        const explicitSig = p.thoughtSignature && !isDefaultSig ? p.thoughtSignature : null;
+        const callSig = cachedSig || explicitSig || (!firstFunctionCallSeen ? DEFAULT_THINKING_AG_SIGNATURE : undefined);
         firstFunctionCallSeen = true;
         if (callSig) {
           return { ...p, thoughtSignature: callSig };
         }
-        if (p.thoughtSignature && !cachedSig) {
-          // Unsigned sibling call
+        if (p.thoughtSignature) {
+          // Strip default fallback signatures from unsigned sibling calls
           const { thoughtSignature: _, ...rest } = p;
           return rest;
         }
@@ -367,9 +401,13 @@ export class AntigravityExecutor extends BaseExecutor {
       generationConfig.maxOutputTokens = outputCeiling;
     }
 
-    const thinkingLevel = resolveAntigravityThinkingLevel(wireId);
+    const existingThinkingLevel = generationConfig.thinkingConfig?.thinkingLevel;
+    const thinkingLevel = resolveAntigravityThinkingLevel(wireId, existingThinkingLevel);
     if (thinkingLevel) {
-      generationConfig.thinkingConfig = { includeThoughts: true, thinkingLevel };
+      generationConfig.thinkingConfig = { includeThoughts: thinkingLevel !== "MINIMAL", thinkingLevel };
+    } else if (generationConfig.thinkingConfig?.thinkingLevel) {
+      const normalizedExisting = String(generationConfig.thinkingConfig.thinkingLevel).toUpperCase();
+      generationConfig.thinkingConfig.thinkingLevel = normalizedExisting === "MINIMAL" ? "LOW" : normalizedExisting;
     }
 
     const transformedRequest = {

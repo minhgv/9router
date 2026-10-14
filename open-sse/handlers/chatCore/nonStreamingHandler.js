@@ -14,6 +14,7 @@ import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
 import { upstreamResponseHeaders } from "../../utils/upstreamHeaders.js";
 import { stripReasonPlaceholders } from "../../utils/reasonPlaceholder.js";
+import { extractLeakedGeminiToolCalls } from "../../translator/response/gemini-to-openai.js";
 
 function parseToolArguments(value) {
   if (!value) return {};
@@ -187,6 +188,19 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
         }
       }
     }
+    if (textContent) {
+      const { cleanedText, toolCalls: leakedCalls } = extractLeakedGeminiToolCalls(textContent, true);
+      if (leakedCalls.length > 0) {
+        textContent = cleanedText;
+        for (const tc of leakedCalls) {
+          toolCalls.push({
+            id: `call_${tc.name}_${Date.now()}_${toolCalls.length}`,
+            type: "function",
+            function: { name: tc.name, arguments: JSON.stringify(stripReasonPlaceholders(tc.name, tc.args || {}, reasonPlaceholderMap)) }
+          });
+        }
+      }
+    }
 
     const message = { role: "assistant" };
     if (textContent) message.content = textContent;
@@ -195,7 +209,10 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
     if (!message.content && !message.tool_calls) message.content = "";
 
     let finishReason = (candidate.finishReason || "stop").toLowerCase();
+    // Map malformed finishReasons to a valid OpenAI value; healed tool calls upgrade it to tool_calls.
+    if (finishReason === "malformed_function_call") finishReason = "stop";
     if (finishReason === "stop" && toolCalls.length > 0) finishReason = "tool_calls";
+
 
     const result = {
       id: `chatcmpl-${response.responseId || Date.now()}`,

@@ -35,6 +35,7 @@ export function toOpenAIFinish(reason, format) {
         case GEMINI_FINISH.RECITATION:
         case GEMINI_FINISH.BLOCKLIST:
         case GEMINI_FINISH.PROHIBITED_CONTENT: return OPENAI_FINISH.CONTENT_FILTER;
+        case GEMINI_FINISH.MALFORMED_FUNCTION_CALL: return OPENAI_FINISH.STOP;
         default: return OPENAI_FINISH.STOP;
       }
     case "kiro":

@@ -1,3 +1,8 @@
+# v0.5.93 (2026-10-14)
+
+## Fixes
+- **Antigravity**: sync model catalog with live `daily-cloudcode-pa` `fetchAvailableModels` / `streamGenerateContent` (Antigravity 2.23.0) — remove retired models that return `404 NOT_FOUND` (`gemini-3.7-flash-*`, `gemini-3.6-flash-*`, `gemini-3.1-pro*`, `gemini-pro-agent`) or upstream sunset notices (`gemini-3.5-flash-{high,low,extra-low}`, `gemini-3-flash-agent`, `claude-sonnet-4-6`, `claude-opus-4-6-thinking`), add `gemini-3.5-flash-lite` (and set as `searchViaChat.defaultModel`), and align quota tracking, MITM aliases/patterns, and CLI menus with active Gemini 4 Argon, Gemini 3.8 Flash, Claude 5.5 Opus/Sonnet, GPT-OSS 120B, Gemini 3.5 Flash Lite, Gemini 3 Flash, and Gemini 3.1 Flash Image models
+
 # v0.5.92 (2026-10-14)
 
 ## Fixes

@@ -1,3 +1,8 @@
+# v0.5.95 (2026-10-14)
+
+## Fixes
+- **Antigravity/Gemini tool history**: healed `default_api` tool calls now reuse the orphan `tool_call_id` left behind by a leaked call so the real tool result pairs with the recovered `functionCall` (previously a synthesized empty `functionResponse` was emitted and the real result was orphaned). The healed id keeps the canonical `<name>-<ts>-<idx>` shape — v0.5.94's 4-segment id broke the fid→name fallback (`slice(0,-2)`), producing `functionResponse.name` mismatches that upstream rejected with `INVALID_ARGUMENT` (400) on every poisoned history. Healed ids are also registered in the name map so the synthesized response carries the correct tool name.
+
 # v0.5.94 (2026-10-14)
 
 ## Fixes

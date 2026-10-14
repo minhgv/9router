@@ -75,26 +75,10 @@ describe("Gemini 3.7 MITM model extraction", () => {
   });
 });
 
-describe("Gemini 3.7 MITM tools and catalog", () => {
-  it("includes gemini-3.7-flash tiers in MITM_TOOLS defaultModels", () => {
-    const defaultModelIds = MITM_TOOLS.antigravity.defaultModels.map((m) => m.id);
-    expect(defaultModelIds).toContain("gemini-3.7-flash-high");
-    expect(defaultModelIds).toContain("gemini-3.7-flash-medium");
-    expect(defaultModelIds).toContain("gemini-3.7-flash-low");
-  });
-
+describe("Gemini 3.7 direct API and pricing", () => {
   it("exposes the direct Gemini 3.7 API models and pricing", () => {
     const ids = gemini.models.map((model) => model.id);
     expect(ids).toContain("gemini-3.7-flash");
     expect(MODEL_PRICING["gemini-3.7-flash"]).toMatchObject({ input: 1.5, output: 7.5 });
-  });
-
-  it("keeps the standalone CLI Antigravity catalog synchronized", () => {
-    const source = readFileSync(join(here, "../../cli/src/cli/menus/providers.js"), "utf8");
-    const agCatalog = source.match(/\n  ag: \[([\s\S]*?)\n  \],/)?.[1] || "";
-
-    expect(agCatalog).toContain("gemini-3.7-flash-high");
-    expect(agCatalog).toContain("gemini-3.7-flash-medium");
-    expect(agCatalog).toContain("gemini-3.7-flash-low");
   });
 });

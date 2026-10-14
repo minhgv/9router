@@ -771,10 +771,10 @@ export function parseQuotaData(provider, data) {
       // Use modelKey for antigravity (mapped to family anchor), otherwise use name
       let keyA = a.modelKey || a.name;
       let keyB = b.modelKey || b.name;
-      if (keyA === "gemini" || keyA === "gemini_session") keyA = "gemini-3.8-flash-high";
-      if (keyA === "claude" || keyA === "claude_gpt_session") keyA = "claude-sonnet-4-6";
-      if (keyB === "gemini" || keyB === "gemini_session") keyB = "gemini-3.8-flash-high";
-      if (keyB === "claude" || keyB === "claude_gpt_session") keyB = "claude-sonnet-4-6";
+      if (keyA === "gemini" || keyA === "gemini_session") keyA = "gemini-4-argon-high";
+      if (keyA === "claude" || keyA === "claude_gpt_session") keyA = "claude-opus-5-5-high";
+      if (keyB === "gemini" || keyB === "gemini_session") keyB = "gemini-4-argon-high";
+      if (keyB === "claude" || keyB === "claude_gpt_session") keyB = "claude-opus-5-5-high";
       const orderA = orderMap.get(keyA) ?? 999;
       const orderB = orderMap.get(keyB) ?? 999;
       return orderA - orderB;

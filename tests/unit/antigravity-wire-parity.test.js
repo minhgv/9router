@@ -27,9 +27,11 @@ describe("Antigravity wire catalog parity", () => {
     }
   });
 
-  it("gemini-3.5-flash-high maps to the agent wire id", () => {
-    const entry = PROVIDERS.models.find(m => m.id === "gemini-3.5-flash-high");
-    expect(entry.upstreamModelId).toBe("gemini-3-flash-agent");
+  it("bare tiered ids map to the medium tier upstream", () => {
+    const argon = PROVIDERS.models.find(m => m.id === "gemini-4-argon");
+    const flash = PROVIDERS.models.find(m => m.id === "gemini-3.8-flash");
+    expect(argon.upstreamModelId).toBe("gemini-4-argon-medium");
+    expect(flash.upstreamModelId).toBe("gemini-3.8-flash-medium");
   });
 
   it("tiered flash ids inject thinkingLevel", () => {

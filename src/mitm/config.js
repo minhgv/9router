@@ -51,10 +51,11 @@ function isChatRequest(tool, req) {
 // Synonym map: rawModel from request → canonical alias key in mitmAlias DB
 const MODEL_SYNONYMS = {
   antigravity: {
-    "gemini-default": "gemini-3.5-flash-low",
-    "gemini-3.5-flash-high": "gemini-3-flash-agent",
-    "gemini-3.5-flash-medium": "gemini-3.5-flash-low",
-    "gemini-3.5-flash-extra-low": "gemini-3.5-flash-extra-low",
+    "gemini-default": "gemini-4-argon",
+    "gemini-4-argon": "gemini-4-argon",
+    "gemini-4-argon-high": "gemini-4-argon-high",
+    "gemini-4-argon-medium": "gemini-4-argon-medium",
+    "gemini-4-argon-low": "gemini-4-argon-low",
     "gemini-3.8-flash": "gemini-3.8-flash-medium",
     "gemini-3.8-flash-high": "gemini-3.8-flash-high",
     "gemini-3.8-flash-medium": "gemini-3.8-flash-medium",
@@ -62,6 +63,9 @@ const MODEL_SYNONYMS = {
     "gemini-3.7-flash-high": "gemini-3.7-flash-high",
     "gemini-3.7-flash-medium": "gemini-3.7-flash-medium",
     "gemini-3.7-flash-low": "gemini-3.7-flash-low",
+    "gemini-3.5-flash-high": "gemini-3-flash-agent",
+    "gemini-3.5-flash-medium": "gemini-3.5-flash-low",
+    "gemini-3.5-flash-extra-low": "gemini-3.5-flash-extra-low",
     "gemini-3.1-pro-high": "gemini-pro-agent",
     "gemini-3-pro-high": "gemini-pro-agent",
     "gemini-3-pro-low": "gemini-3.1-pro-low",
@@ -72,14 +76,20 @@ const MODEL_SYNONYMS = {
 // Order matters: more specific patterns first. Catches AG renamed variants (e.g. gemini-pro-agent)
 const MODEL_PATTERNS = {
   antigravity: [
-    { match: /flash.*extra.*low|extra.*low.*flash|flash.*low|low.*flash/i, alias: "gemini-3.5-flash-extra-low" },
-    { match: /flash.*medium|medium.*flash/i,                       alias: "gemini-3.5-flash-low" },
-    { match: /flash.*agent|agent.*flash|flash/i,                   alias: "gemini-3-flash-agent" },
-    { match: /pro.*low|low.*pro/i,                                 alias: "gemini-3.1-pro-low" },
-    { match: /gemini.*pro|pro.*gemini/i,                           alias: "gemini-pro-agent" },
-    { match: /opus/i,                                              alias: "claude-opus-4-6-thinking" },
-    { match: /sonnet|claude/i,                                     alias: "claude-sonnet-4-6" },
-    { match: /gpt.*oss|oss/i,                                      alias: "gpt-oss-120b-medium" },
+    { match: /argon.*high|high.*argon/i,                             alias: "gemini-4-argon-high" },
+    { match: /argon.*low|low.*argon/i,                               alias: "gemini-4-argon-low" },
+    { match: /argon/i,                                               alias: "gemini-4-argon-medium" },
+    { match: /flash.*lite/i,                                         alias: "gemini-3.5-flash-lite" },
+    { match: /flash.*extra.*low|extra.*low.*flash|flash.*low|low.*flash/i, alias: "gemini-3.8-flash-low" },
+    { match: /flash.*medium|medium.*flash/i,                         alias: "gemini-3.8-flash-medium" },
+    { match: /flash.*high|high.*flash|flash.*agent|agent.*flash|flash/i, alias: "gemini-3.8-flash-high" },
+    { match: /opus.*high|high.*opus/i,                               alias: "claude-opus-5-5-high" },
+    { match: /opus.*low|low.*opus/i,                                 alias: "claude-opus-5-5-low" },
+    { match: /opus/i,                                                alias: "claude-opus-5-5-medium" },
+    { match: /sonnet.*high|high.*sonnet/i,                           alias: "claude-sonnet-5-5-high" },
+    { match: /sonnet.*low|low.*sonnet/i,                             alias: "claude-sonnet-5-5-low" },
+    { match: /sonnet|claude/i,                                       alias: "claude-sonnet-5-5-medium" },
+    { match: /gpt.*oss|oss/i,                                        alias: "gpt-oss-120b-medium" },
   ],
 };
 

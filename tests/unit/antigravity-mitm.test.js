@@ -14,11 +14,11 @@ describe("Antigravity MITM model handling", () => {
   const ag = MITM_TOOLS.antigravity;
 
   it("flags the out-of-box agent/Default model mandatory", () => {
-    expect(ag.defaultModels.find((m) => m.id === "gemini-3.5-flash-low")?.mandatory).toBe(true);
+    expect(ag.defaultModels.find((m) => m.id === "gemini-4-argon")?.mandatory).toBe(true);
   });
 
   it("leaves models not proven auto-sent optional", () => {
-    for (const id of ["gemini-3-flash-agent", "gemini-3.1-pro-low", "claude-sonnet-4-6", "gpt-oss-120b-medium"]) {
+    for (const id of ["gemini-3.8-flash-high", "claude-sonnet-5-5-medium", "gpt-oss-120b-medium"]) {
       expect(ag.defaultModels.find((m) => m.id === id)?.mandatory).toBeFalsy();
     }
   });

@@ -60,22 +60,7 @@ export default {
     { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)", upstreamModelId: "gemini-3.8-flash-medium" },
     { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)", upstreamModelId: "gemini-3.8-flash-low" },
     { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", upstreamModelId: "gemini-3.8-flash-medium" },
-    { id: "gemini-3.7-flash-high", name: "Gemini 3.7 Flash (High)", upstreamModelId: "gemini-3.7-flash-high" },
-    { id: "gemini-3.7-flash-medium", name: "Gemini 3.7 Flash (Medium)", upstreamModelId: "gemini-3.7-flash-medium" },
-    { id: "gemini-3.7-flash-low", name: "Gemini 3.7 Flash (Low)", upstreamModelId: "gemini-3.7-flash-low" },
-    { id: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash (High)", upstreamModelId: "gemini-3.6-flash-high" },
-    { id: "gemini-3.6-flash-medium", name: "Gemini 3.6 Flash (Medium)", upstreamModelId: "gemini-3.6-flash-medium" },
-    { id: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)", upstreamModelId: "gemini-3.6-flash-low" },
-    // The 3.5 generation has no "...-flash-high" upstream id; its High tier is
-    // served by the agent id (antigravity-opencode catalog).
-    { id: "gemini-3.5-flash-high", name: "Gemini 3.5 Flash (High)", upstreamModelId: "gemini-3-flash-agent" },
-    { id: "gemini-3-flash-agent", name: "Gemini 3.5 Flash (High)" },
-    { id: "gemini-3.1-pro", name: "Gemini 3.1 Pro (High)", upstreamModelId: "gemini-pro-agent" },
-    { id: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Medium)" },
-    { id: "gemini-3.5-flash-extra-low", name: "Gemini 3.5 Flash (Low)" },
-    { id: "gemini-pro-agent", name: "Gemini 3.1 Pro (High)" },
-    { id: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)" },
-    // Claude 5.5 carries the thinking tier in the wire id itself (the Gemini
+    //Claude 5.5 carries the thinking tier in the wire id itself (the Gemini
     // 3.8 pattern) — claude-{opus,sonnet}-5-5-{low,medium,high}, no
     // thinkingConfig from the executor (parity: antigravity-opencode models).
     { id: "claude-opus-5-5-high", name: "Claude Opus 5.5 (High)" },
@@ -86,10 +71,8 @@ export default {
     { id: "claude-sonnet-5-5-medium", name: "Claude Sonnet 5.5 (Medium)" },
     { id: "claude-sonnet-5-5-low", name: "Claude Sonnet 5.5 (Low)" },
     { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", upstreamModelId: "claude-sonnet-5-5-medium" },
-    // Still served as of 2026-10-04; official docs schedule removal 2026-11-02.
-    { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)" },
-    { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)" },
     { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" },
+    { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite" },
     { id: "gemini-3-flash", name: "Gemini 3 Flash", thinking: false },
     // Image generation models
     { id: "gemini-3.1-flash-image", name: "Gemini 3.1 Flash (Image)", kind: "image", imageGen: true, capabilities: ["textToImage"] },
@@ -113,7 +96,7 @@ export default {
     refreshLeadMs: 300000,
   },
   searchViaChat: {
-    defaultModel: "gemini-2.5-flash",
+    defaultModel: "gemini-3.5-flash-lite",
     endpoint: `${ANTIGRAVITY_IDE_BASE_URL}/v1internal:generateContent`,
     freeTier: "Free — Google Search grounding through an Antigravity OAuth account.",
   },
